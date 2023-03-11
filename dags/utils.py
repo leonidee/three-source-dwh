@@ -6,6 +6,14 @@ from typing import Dict
 import sys
 
 
+class DatabaseConnectionError(Exception):
+    pass
+
+
+class SQLError(Exception):
+    pass
+
+
 def get_logger(logger_name: str) -> logging.Logger:
 
     logger = logging.getLogger(name=logger_name)
