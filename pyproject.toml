@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "two-source-dwh"
+version = "0.1.0"
+description = ""
+authors = ["Leonidee"]
+readme = "README.md"
+packages = [{include = "two_source_dwh"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+python-dotenv = "0.21.1"
+pydantic = "1.10.6"
+apache-airflow = "2.5.1"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
