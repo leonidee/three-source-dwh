@@ -10,6 +10,8 @@ from dotenv import load_dotenv, find_dotenv
 from main import BonussystemDataMover
 from utils import get_logger, connect_to_database
 
+DAG_START_DATE = datetime(2023, 3, 12)
+
 logger = get_logger(logger_name=str(Path(Path(__file__).name)))
 
 find_dotenv(raise_error_if_not_found=True)
@@ -59,7 +61,7 @@ def load_outbox_data(data_mover: BonussystemDataMover) -> None:
 
 @dag(
     schedule_interval="0/15 * * * *",
-    start_date=datetime(2023, 3, 11),
+    start_date=DAG_START_DATE,
     catchup=False,
     is_paused_upon_creation=False,
     dag_id="bonussystem-sync-dag",

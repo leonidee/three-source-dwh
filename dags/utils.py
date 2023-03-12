@@ -21,7 +21,7 @@ def get_logger(logger_name: str) -> logging.Logger:
     logger.setLevel(level=logging.INFO)
 
     formatter = logging.Formatter(
-        fmt="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        fmt="[%(asctime)s] {%(name)s:%(lineno)d} %(levelname)s - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
@@ -51,3 +51,7 @@ def connect_to_database(creds: Dict) -> Engine:
         logger.exception(f"Connection to `{creds['database']}` database failed!")
 
     return engine
+
+
+if __name__ == "__main__":
+    logger.info("This is a testing message.")

@@ -8,9 +8,11 @@ from datetime import datetime, timedelta
 from airflow.decorators import task, dag
 from airflow.operators.empty import EmptyOperator
 from airflow.models.baseoperator import chain
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
 
 DWH_DDL_SQL = "sql/dwh-init-ddl.sql"
+DAG_START_DATE = datetime(2023, 3, 12)
 
 logger = get_logger(logger_name=str(Path(Path(__file__).name)))
 
@@ -50,24 +52,33 @@ def execute_init_sql(engine: Engine, sql: Path | str) -> None:
 @dag(
     dag_id="dwh-init-dag",
     schedule_interval="@once",
-    start_date=datetime(2023, 3, 11),
+    start_date=DAG_START_DATE,
     default_args={
         "owner": "leonide",
         "retries": 5,
-        "retry_delay": timedelta(minutes=10),
+        "retry_delay": timedelta(seconds=20),
     },
     catchup=False,
     is_paused_upon_creation=False,
 )
 def taskflow() -> None:
 
-    start = EmptyOperator(task_id="start")
+    start = EmptyOperator(task_id="starting")
 
     execute_sql = execute_init_sql(engine=engine, sql=DWH_DDL_SQL)
 
-    end = EmptyOperator(task_id="end")
+    trigger = TriggerDagRunOperator(
+        task_id="trigger_bonussystem_sync_dag",
+        trigger_dag_id="bonussystem-sync-dag",
+        wait_for_completion=True,
+        poke_interval=10,
+        allowed_states=["success"],
+        failed_states=["skipped", "failed"],
+    )
 
-    chain(start, execute_sql, end)
+    end = EmptyOperator(task_id="ending")
+
+    chain(start, execute_sql, trigger, end)
 
 
 dag = taskflow()
