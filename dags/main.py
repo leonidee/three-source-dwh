@@ -1,19 +1,21 @@
 from datetime import datetime
-from typing import List, Any, Literal
+from typing import List, Any, Literal, Union
 from sqlalchemy.engine import Engine
 from sqlalchemy import text
 from datetime import datetime
 import os
 from pathlib import Path
 import json
-
+from pymongo.mongo_client import MongoClient
+from pymongo.cursor import Cursor
 
 from utils import get_logger
-from dataobjs import (
+from objs import (
     EtlObj,
     BonussystemRankObj,
     BonussystemUserObj,
     BonussystemOutboxObj,
+    OrdersystemObj,
 )
 
 
@@ -24,7 +26,9 @@ class EtlWarehouseSyncer:
     def __init__(self, engine: Engine) -> None:
         self.engine = engine
 
-    def get_latest_sync(self, etl_key: str) -> EtlObj:
+    def get_latest_sync(
+        self, etl_key: str, type: Literal["latest_loaded_id", "latest_loaded_ts"]
+    ) -> EtlObj:
         logger.info(f"Getting latest sync data for `{etl_key}` key.")
 
         try:
@@ -52,7 +56,9 @@ class EtlWarehouseSyncer:
                 f"There is no workflow key with name `{etl_key}`! Returning default value."
             )
             obj = EtlObj(
-                id=0, workflow_key=etl_key, workflow_settings={"latest_loaded_id": -1}
+                id=0,
+                workflow_key=etl_key,
+                workflow_settings={"latest_loaded_id": -1},
             )
 
         return obj
@@ -61,7 +67,7 @@ class EtlWarehouseSyncer:
         self,
         etl_key: str,
         collection: List[Any],
-        type: Literal["latest_loaded_id", "latest_sync_ts"],
+        type: Literal["latest_loaded_id", "latest_loaded_ts"],
     ) -> None:
 
         if type == "latest_loaded_id":
@@ -86,21 +92,19 @@ class EtlWarehouseSyncer:
                                 """
                             )
                         )
-                    # conn.commit()
                     logger.info(f"Succesfully saved `{etl_key}` ETL key data.")
 
                 except Exception:
-                    # conn.rollback()
                     logger.exception("Unable to save sync data!")
 
             except Exception:
                 logger.info("Nothing to update.")
 
-        if type == "latest_sync_ts":
+        if type == "latest_loaded_ts":
             try:
-                latest_sync_ts = str(datetime.today())
+                latest_loaded_ts = str(datetime.today())
                 etl_dict = json.dumps(
-                    obj={type: latest_sync_ts}, sort_keys=True, ensure_ascii=False
+                    obj={type: latest_loaded_ts}, sort_keys=True, ensure_ascii=False
                 )
                 with self.engine.begin() as conn:
                     conn.execute(
@@ -123,10 +127,10 @@ class EtlWarehouseSyncer:
 
 
 class BonussystemDataMover:
-    def __init__(self, origin_engine: Engine, dwh_engine: Engine) -> None:
-        self.origin_engine = origin_engine
-        self.dwh_engine = dwh_engine
-        self.etl_syncer = EtlWarehouseSyncer(engine=dwh_engine)
+    def __init__(self, source_conn: Engine, dwh_conn: Engine) -> None:
+        self.source_conn = source_conn
+        self.dwh_conn = dwh_conn
+        self.etl_syncer = EtlWarehouseSyncer(engine=dwh_conn)
 
     def _get_data_from_source(
         self, query: str, etl_key: str, type: Literal["snapshot", "increment"]
@@ -137,7 +141,7 @@ class BonussystemDataMover:
             etl_obj = self.etl_syncer.get_latest_sync(etl_key=etl_key)
 
             try:
-                with self.origin_engine.begin() as conn:
+                with self.source_conn.begin() as conn:
                     result = conn.execute(
                         statement=text(
                             query.format(
@@ -155,7 +159,7 @@ class BonussystemDataMover:
                 )
         if type == "snapshot":
             try:
-                with self.origin_engine.begin() as conn:
+                with self.source_conn.begin() as conn:
                     result = conn.execute(statement=text(query)).fetchall()
                 logger.info(f"{len(result)} rows recieved from source.")
 
@@ -168,7 +172,7 @@ class BonussystemDataMover:
     def load_ranks_data(self) -> None:
         """Snapshot update"""
 
-        etl_key = "ranks"
+        etl_key = "bonus_system_ranks"
 
         get_query = """ 
             SELECT
@@ -195,7 +199,7 @@ class BonussystemDataMover:
             "Trying to insert public.ranks source data to stg.bonussystem_ranks table."
         )
         try:
-            with self.dwh_engine.begin() as conn:
+            with self.dwh_conn.begin() as conn:
                 for row in collection:
                     conn.execute(
                         statement=text(
@@ -214,7 +218,7 @@ class BonussystemDataMover:
                     )
 
             self.etl_syncer.save_sync(
-                etl_key=etl_key, collection=collection, type="latest_sync_ts"
+                etl_key=etl_key, collection=collection, type="latest_loaded_ts"
             )
             logger.info(
                 f"stg.bonusystem_ranks table was succesfully updated. {len(collection)} rows were updated."
@@ -226,7 +230,7 @@ class BonussystemDataMover:
     def load_users_data(self) -> None:
         """Snapshot update"""
 
-        etl_key = "users"
+        etl_key = "bonus_system_users"
 
         get_query = """ 
             SELECT
@@ -246,7 +250,7 @@ class BonussystemDataMover:
             "Trying to insert public.users source data to stg.bonussystem_users table."
         )
         try:
-            with self.dwh_engine.begin() as conn:
+            with self.dwh_conn.begin() as conn:
                 for row in collection:
                     conn.execute(
                         statement=text(
@@ -262,7 +266,7 @@ class BonussystemDataMover:
                         )
                     )
             self.etl_syncer.save_sync(
-                etl_key=etl_key, type="latest_sync_ts", collection=collection
+                etl_key=etl_key, type="latest_loaded_ts", collection=collection
             )
             logger.info(
                 f"stg.bonusystem_users table was succesfully updated. {len(collection)} rows were updated."
@@ -274,7 +278,7 @@ class BonussystemDataMover:
     def load_outbox_data(self) -> None:
         """Increment update"""
 
-        etl_key = "outbox"
+        etl_key = "bonus_system_outbox"
 
         get_query = """ 
             SELECT
@@ -299,7 +303,7 @@ class BonussystemDataMover:
             "Trying to insert public.outbox source data to stg.bonussystem_events table."
         )
         try:
-            with self.dwh_engine.begin() as conn:
+            with self.dwh_conn.begin() as conn:
                 for row in collection:
                     conn.execute(
                         statement=text(
@@ -327,36 +331,59 @@ class BonussystemDataMover:
             logger.exception("Unable to insert data to stg.bonussystem_events table.")
 
 
+# TODO raise all exeption
+
+
+class OrdersystemDataMover:
+    def __init__(self, source_conn: MongoClient, dwh_conn: Engine) -> None:
+        self.source_conn = source_conn
+        self.dwh_conn = dwh_conn
+        self.etl_syncer = EtlWarehouseSyncer(engine=dwh_conn)
+
+    def _get_data_from_source(self, etl_key: str, collection: str) -> Cursor:
+        logger.info(f"Getting `{etl_key}` data from source.")
+
+        etl_obj = self.etl_syncer.get_latest_sync(etl_key=etl_key)
+        latest_loaded_ts = datetime.fromisoformat(
+            etl_obj.workflow_settings["latest_loaded_ts"]
+        )
+
+        MONGO_FILTER = {"update_ts": {"$gt": latest_loaded_ts}}
+
+        cur = self.source_conn.get_collection(collection).find(
+            filter=MONGO_FILTER, sort={"update_ts": 1}
+        )
+
+        return cur
+
+    def load_restaurants(self) -> None:
+        pass
+
+    def load_users(self) -> None:
+
+        etl_key = "order_system_users"
+
+
 if __name__ == "__main__":
 
-    from dotenv import load_dotenv
-    from utils import connect_to_database
+    from utils import DatabaseConnector
 
-    load_dotenv()
+    conn = DatabaseConnector(db="mongo_source").connect_to_database()
 
-    pg_origin_creds = {
-        "host": os.getenv("PG_ORIGIN_HOST"),
-        "port": os.getenv("PG_ORIGIN_PORT"),
-        "user": os.getenv("PG_ORIGIN_USER"),
-        "password": os.getenv("PG_ORIGIN_PASSWORD"),
-        "database": "de-public",
-    }
+    d = "2023-03-10 10:45:06.782220"
+    dn = datetime.fromisoformat(d)
+    print(dn)
 
-    pg_dwh_creds = {
-        "host": os.getenv("PG_DWH_HOST"),
-        "port": os.getenv("PG_DWH_PORT"),
-        "user": os.getenv("PG_DWH_USER"),
-        "password": os.getenv("PG_DWH_PASSWORD"),
-        "database": "dwh",
-    }
+    res = conn.get_collection("users").find(filter={"update_ts": {"$gt": dn}}, sort={})
 
-    pg_dwh_engine = connect_to_database(creds=pg_dwh_creds)
-    pg_origin_engine = connect_to_database(creds=pg_origin_creds)
+    l = []
+    for el in list(res):
 
-    data_mover = BonussystemDataMover(
-        origin_engine=pg_origin_engine, dwh_engine=pg_dwh_engine
-    )
+        obj = OrdersystemObj(
+            object_id=str(el["_id"]),
+            object_value=dict(name=el["name"], login=el["login"]),
+            update_ts=el["update_ts"],
+        )
+        l.append(obj)
 
-    data_mover.load_ranks_data()
-    data_mover.load_users_data()
-    data_mover.load_outbox_data()
+    print(l[:2])

@@ -1,6 +1,7 @@
 from pydantic.dataclasses import dataclass
 from datetime import datetime
 from typing import Dict
+from pathlib import Path
 
 
 @dataclass
@@ -30,3 +31,33 @@ class EtlObj:
     id: int
     workflow_key: str
     workflow_settings: Dict
+
+
+@dataclass
+class CredentialHolder:
+    host: str
+    port: str
+    user: str
+    password: str
+    database: str
+    ca_path: str | Path = None
+    repl_set: str = None
+
+
+@dataclass
+class OrdersystemObj:
+    object_id: str
+    object_value: Dict
+    update_ts: datetime
+
+
+class DatabaseConnectionError(Exception):
+    pass
+
+
+class SQLError(Exception):
+    pass
+
+
+class DotEnvError(Exception):
+    pass
