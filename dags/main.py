@@ -524,4 +524,4 @@ if __name__ == "__main__":
 
     data_mover = OrdersystemDataMover(source_conn=mongo_conn, dwh_conn=dwh_conn)
     # data_mover.load_users()
-    data_mover.load_restaurants()
+    # data_mover.load_restaurants()
