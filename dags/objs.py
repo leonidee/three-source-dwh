@@ -1,7 +1,7 @@
-from pydantic.dataclasses import dataclass
 from datetime import datetime
 from typing import Dict
 from pathlib import Path
+from dataclasses import dataclass
 
 
 @dataclass
@@ -60,4 +60,12 @@ class SQLError(Exception):
 
 
 class DotEnvError(Exception):
+    pass
+
+
+class MongoServiceError(Exception):
+    pass
+
+
+class FSError(Exception):
     pass

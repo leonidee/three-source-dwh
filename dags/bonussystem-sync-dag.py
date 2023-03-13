@@ -12,12 +12,10 @@ DAG_START_DATE = datetime(2023, 3, 12)
 
 logger = get_logger(logger_name=str(Path(Path(__file__).name)))
 
-pg_dwh_engine = DatabaseConnector(db="pg_dwh").connect_to_postgres()
-pg_origin_engine = DatabaseConnector(db="pg_source").connect_to_postgres()
+pg_dwh_engine = DatabaseConnector(db="pg_dwh").connect_to_database()
+pg_origin_engine = DatabaseConnector(db="pg_source").connect_to_database()
 
-data_mover = BonussystemDataMover(
-    origin_engine=pg_origin_engine, dwh_engine=pg_dwh_engine
-)
+data_mover = BonussystemDataMover(source_conn=pg_origin_engine, dwh_conn=pg_dwh_engine)
 
 
 @task

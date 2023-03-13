@@ -1,33 +1,22 @@
-import os
-from dotenv import find_dotenv, load_dotenv
 from pathlib import Path
-from utils import connect_to_database, get_logger
 from sqlalchemy.engine import Engine
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from airflow.decorators import task, dag
 from airflow.operators.empty import EmptyOperator
 from airflow.models.baseoperator import chain
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
+from utils import DatabaseConnector, get_logger
+from objs import SQLError, FSError
 
 DWH_DDL_SQL = "sql/dwh-init-ddl.sql"
 DAG_START_DATE = datetime(2023, 3, 12)
 
 logger = get_logger(logger_name=str(Path(Path(__file__).name)))
 
-find_dotenv(raise_error_if_not_found=True)
-load_dotenv(verbose=True, override=True)
-
-pg_dwh_creds = {
-    "host": os.getenv("PG_DWH_HOST"),
-    "port": os.getenv("PG_DWH_PORT"),
-    "user": os.getenv("PG_DWH_USER"),
-    "password": os.getenv("PG_DWH_PASSWORD"),
-    "database": "dwh",
-}
-
-engine = connect_to_database(creds=pg_dwh_creds)
+engine = DatabaseConnector(db="pg_dwh").connect_to_database()
 
 
 @task
@@ -40,6 +29,7 @@ def execute_init_sql(engine: Engine, sql: Path | str) -> None:
         query = Path(Path(__file__).parent, sql).read_text(encoding="UTF-8")
     except Exception:
         logger.exception(f"Unable to read {sql} file!")
+        raise FSError
 
     try:
         with engine.begin() as conn:
@@ -47,6 +37,7 @@ def execute_init_sql(engine: Engine, sql: Path | str) -> None:
         logger.info(f"{sql} file was successfully executed. DWH layers initialized.")
     except Exception:
         logger.exception(f"Unable to execute {sql} file! Initialize process failed.")
+        raise SQLError
 
 
 @dag(
