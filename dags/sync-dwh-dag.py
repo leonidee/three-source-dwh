@@ -6,22 +6,14 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from main import BonussystemDataMover, OrdersystemDataMover
-from utils import get_logger, DatabaseConnector
+from utils import get_logger
 
 DAG_START_DATE = datetime(2023, 3, 12)
 
 logger = get_logger(logger_name=str(Path(Path(__file__).name)))
 
-pg_dwh_conn = DatabaseConnector(db="pg_dwh").connect_to_database()
-pg_source_conn = DatabaseConnector(db="pg_source").connect_to_database()
-mongo_source_conn = DatabaseConnector(db="mongo_source").connect_to_database()
-
-bonussystem_data_mover = BonussystemDataMover(
-    source_conn=pg_source_conn, dwh_conn=pg_dwh_conn
-)
-ordersystem_data_mover = OrdersystemDataMover(
-    source_conn=mongo_source_conn, dwh_conn=pg_dwh_conn
-)
+bonussystem_data_mover = BonussystemDataMover()
+ordersystem_data_mover = OrdersystemDataMover()
 
 
 @task

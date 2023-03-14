@@ -8,7 +8,7 @@ from pathlib import Path
 from pymongo.mongo_client import MongoClient
 from pymongo.cursor import Cursor
 
-from utils import get_logger
+from utils import get_logger, DatabaseConnector
 from objs import (
     EtlObj,
     BonussystemRankObj,
@@ -172,10 +172,10 @@ class EtlWarehouseSyncer:
 
 
 class BonussystemDataMover:
-    def __init__(self, source_conn: Engine, dwh_conn: Engine) -> None:
-        self.source_conn = source_conn
-        self.dwh_conn = dwh_conn
-        self.etl_syncer = EtlWarehouseSyncer(engine=dwh_conn)
+    def __init__(self) -> None:
+        self.source_conn = DatabaseConnector(db="pg_source").connect_to_database()
+        self.dwh_conn = DatabaseConnector(db="pg_dwh").connect_to_database()
+        self.etl_syncer = EtlWarehouseSyncer(engine=self.dwh_conn)
 
     def _get_data_from_source(
         self, query: str, etl_key: str, type: Literal["snapshot", "increment"]
@@ -379,10 +379,10 @@ class BonussystemDataMover:
 
 
 class OrdersystemDataMover:
-    def __init__(self, source_conn: MongoClient, dwh_conn: Engine) -> None:
-        self.source_conn = source_conn
-        self.dwh_conn = dwh_conn
-        self.etl_syncer = EtlWarehouseSyncer(engine=dwh_conn)
+    def __init__(self) -> None:
+        self.source_conn = DatabaseConnector(db="mongo_source").connect_to_database()
+        self.dwh_conn = DatabaseConnector(db="pg_dwh").connect_to_database()
+        self.etl_syncer = EtlWarehouseSyncer(engine=self.dwh_conn)
 
     def _get_data_from_source(self, etl_key: str, collection_name: str) -> Cursor:
         logger.info(f"Getting `{etl_key}` data from source.")
@@ -517,11 +517,6 @@ class OrdersystemDataMover:
 
 if __name__ == "__main__":
 
-    from utils import DatabaseConnector
-
-    mongo_conn = DatabaseConnector(db="mongo_source").connect_to_database()
-    dwh_conn = DatabaseConnector(db="pg_dwh").connect_to_database()
-
-    data_mover = OrdersystemDataMover(source_conn=mongo_conn, dwh_conn=dwh_conn)
+    data_mover = OrdersystemDataMover()
     # data_mover.load_users()
     # data_mover.load_restaurants()
