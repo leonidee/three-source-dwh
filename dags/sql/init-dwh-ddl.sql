@@ -165,7 +165,7 @@ DROP TABLE IF EXISTS dds.fct_product_sales;
 CREATE TABLE dds.dm_users
 (
     id         serial  NOT NULL PRIMARY KEY,
-    user_id    varchar NOT NULL,
+    user_id    varchar NOT NULL UNIQUE,
     user_name  varchar NOT NULL,
     user_login varchar NOT NULL
 );
@@ -173,7 +173,7 @@ CREATE TABLE dds.dm_users
 CREATE TABLE dds.dm_restaurants
 (
     id              serial    NOT NULL PRIMARY KEY,
-    restaurant_id   varchar   NOT NULL,
+    restaurant_id   varchar   NOT NULL UNIQUE,
     restaurant_name varchar   NOT NULL,
     active_from     timestamp NOT NULL,
     active_to       timestamp NOT NULL
@@ -252,5 +252,26 @@ CREATE TABLE dds.fct_product_sales
 ALTER TABLE dds.fct_product_sales
     ADD FOREIGN KEY (product_id) REFERENCES dds.dm_products (id),
     ADD FOREIGN KEY (order_id) REFERENCES dds.dm_orders (id);
+
+/*
+SERVICE TABLES
+*/
+-- for STG layer
+DROP TABLE IF EXISTS stg.srv_wf_settings;
+CREATE TABLE IF NOT EXISTS stg.srv_wf_settings
+(
+    id               int GENERATED ALWAYS AS IDENTITY NOT NULL,
+    workflow_key     varchar UNIQUE                      NOT NULL,
+    workflow_settings json                                NOT NULL
+);
+
+-- for DDS layer
+DROP TABLE IF EXISTS dds.srv_wf_settings;
+CREATE TABLE IF NOT EXISTS dds.srv_wf_settings
+(
+    id               int GENERATED ALWAYS AS IDENTITY NOT NULL,
+    workflow_key     varchar UNIQUE                      NOT NULL,
+    workflow_settings json                                NOT NULL
+);
 
 END TRANSACTION;

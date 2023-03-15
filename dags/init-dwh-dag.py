@@ -11,7 +11,7 @@ from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from utils import DatabaseConnector, get_logger
 from objs import SQLError, FSError
 
-DWH_DDL_SQL = "sql/dwh-init-ddl.sql"
+DWH_DDL_SQL = "sql/init-dwh-ddl.sql"
 DAG_START_DATE = datetime(2023, 3, 12)
 
 logger = get_logger(logger_name=str(Path(Path(__file__).name)))
@@ -60,7 +60,7 @@ def taskflow() -> None:
 
     trigger = TriggerDagRunOperator(
         task_id="trigger_bonussystem_sync_dag",
-        trigger_dag_id="bonussystem-sync-dag",
+        trigger_dag_id="load-stg-dwh-dag",
         wait_for_completion=True,
         poke_interval=10,
         allowed_states=["success"],
