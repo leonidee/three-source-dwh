@@ -9,7 +9,7 @@ from airflow.models.baseoperator import chain
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
 from utils import DatabaseConnector, get_logger
-from objs import SQLError, FSError
+from errors import SQLError, FSError
 
 DWH_DDL_SQL = "sql/init-dwh-ddl.sql"
 DAG_START_DATE = datetime(2023, 3, 12)
@@ -20,7 +20,7 @@ engine = DatabaseConnector(db="pg_dwh").connect_to_database()
 
 
 @task
-def execute_init_sql(engine: Engine, sql: Path | str) -> None:
+def execute_init_sql(engine: Engine, sql: str) -> None:
 
     logger.info("Starting initializing process.")
 
@@ -47,7 +47,7 @@ def execute_init_sql(engine: Engine, sql: Path | str) -> None:
     default_args={
         "owner": "leonide",
         "retries": 5,
-        "retry_delay": timedelta(seconds=20),
+        "retry_delay": timedelta(seconds=30),
     },
     catchup=False,
     is_paused_upon_creation=False,
@@ -59,9 +59,9 @@ def taskflow() -> None:
     execute_sql = execute_init_sql(engine=engine, sql=DWH_DDL_SQL)
 
     trigger = TriggerDagRunOperator(
-        task_id="trigger_bonussystem_sync_dag",
+        task_id="trigger_load_stg_dwh_dag",
         trigger_dag_id="load-stg-dwh-dag",
-        wait_for_completion=True,
+        wait_for_completion=False,
         poke_interval=10,
         allowed_states=["success"],
         failed_states=["skipped", "failed"],

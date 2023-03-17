@@ -294,6 +294,116 @@ class DDSEtlSyncer:
     def __init__(self, dwh_conn: Engine) -> None:
         self.dwh_conn = dwh_conn
 
+    def get_latest_sync(
+        self, etl_key: str, type: Literal["latest_loaded_id", "latest_loaded_ts"]
+    ) -> EtlObj:
+        logger.info(f"Getting latest sync data for `{etl_key}` key.")
+
+        try:
+            with self.engine.begin() as conn:
+                result = conn.execute(
+                    statement=text(
+                        f""" 
+                        SELECT
+                            id,
+                            workflow_key,
+                            workflow_settings
+                        FROM stg.srv_wf_settings
+                        WHERE workflow_key = '{etl_key}';
+                    """
+                    )
+                ).fetchone()
+
+            obj = EtlObj(
+                id=result[0], workflow_key=result[1], workflow_settings=result[2]
+            )
+            logger.info(f"Sync data for `{etl_key}` key recieved.")
+
+        except Exception:
+            logger.info(
+                f"There is no workflow key with name `{etl_key}`! Returning default value."
+            )
+            if type == "latest_loaded_ts":
+                obj = EtlObj(
+                    id=0,
+                    workflow_key=etl_key,
+                    workflow_settings={
+                        "latest_loaded_ts": datetime(1900, 1, 1).isoformat()
+                    },
+                )
+            if type == "latest_loaded_id":
+                obj = EtlObj(
+                    id=0,
+                    workflow_key=etl_key,
+                    workflow_settings={"latest_loaded_id": -1},
+                )
+
+        return obj
+
+    def save_sync(
+        self,
+        etl_key: str,
+        collection: List[Any],
+        type: Literal["latest_loaded_id", "latest_loaded_ts"],
+    ) -> None:
+
+        if type == "latest_loaded_id":
+            try:
+                latest_loaded_id = max([row.id for row in collection])
+                etl_dict = json.dumps(
+                    obj={type: latest_loaded_id}, sort_keys=True, ensure_ascii=False
+                )
+
+                try:
+                    with self.engine.begin() as conn:
+                        conn.execute(
+                            text(
+                                f"""
+                                INSERT INTO
+                                    stg.srv_wf_settings(workflow_key, workflow_settings)
+                                VALUES
+                                    ('{etl_key}', '{etl_dict}')
+                                ON CONFLICT (workflow_key) DO UPDATE
+                                    SET
+                                        workflow_settings = excluded.workflow_settings;
+                                """
+                            )
+                        )
+                    logger.info(f"Succesfully saved `{etl_key}` ETL key data.")
+
+                except Exception:
+                    logger.exception("Unable to save sync data!")
+                    raise SQLError
+
+            except Exception:
+                logger.info("Nothing to update.")
+
+        if type == "latest_loaded_ts":
+            try:
+                latest_loaded_ts = max([row.update_ts for row in collection])
+                etl_dict = json.dumps(
+                    obj={type: latest_loaded_ts}, sort_keys=True, ensure_ascii=False
+                )
+                with self.engine.begin() as conn:
+                    conn.execute(
+                        text(
+                            f"""
+                            INSERT INTO
+                                stg.srv_wf_settings(workflow_key, workflow_settings)
+                            VALUES
+                                ('{etl_key}', '{etl_dict}')
+                            ON CONFLICT (workflow_key) DO UPDATE
+                                SET
+                                    workflow_settings = excluded.workflow_settings;
+                            """
+                        )
+                    )
+                logger.info(f"Succesfully saved `{etl_key}` ETL key data.")
+
+            except Exception:
+                logger.exception(f"Unable to save `{etl_key}` ETL key data!")
+                raise SQLError
+
 
 if __name__ == "__main__":
 

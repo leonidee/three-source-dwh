@@ -14,6 +14,11 @@ from objs import (
     BonussystemOutboxObj,
     OrdersystemObj,
     DDSUser,
+    DDSRestaurant,
+    DDSTimestamp,
+    DDSProduct,
+    DDSOrder,
+    DDSFactProductSale,
 )
 from errors import SQLError, MongoServiceError
 
@@ -21,7 +26,7 @@ from errors import SQLError, MongoServiceError
 logger = get_logger(logger_name=str(Path(Path(__file__).name)))
 
 
-class BonussystemStgDataMover:
+class STGBonussystemDataLoader:
     """Gets data from Postgres bonus system and loads to STG layer."""
 
     def __init__(self) -> None:
@@ -230,7 +235,7 @@ class BonussystemStgDataMover:
             logger.exception("Unable to insert data to stg.bonussystem_events table.")
 
 
-class OrdersystemStgDataMover:
+class STGOrdersystemDataLoader:
     """Gets data from MongoDB order system and loads to STG layer."""
 
     def __init__(self) -> None:
@@ -438,12 +443,13 @@ class OrdersystemStgDataMover:
             raise SQLError
 
 
-class DDSDataMover:
+class DDSDataLoader:
     def __init__(self) -> None:
         self.dwh_conn = DatabaseConnector(db="pg_dwh").connect_to_database()
         self.etl_syncer = DDSEtlSyncer(dwh_conn=self.dwh_conn)
 
     def load_users(self) -> None:
+        logger.info("Loading dds.dm_users table.")
         logger.info(
             "Getting data from stg.bonussystem_users and stg.ordersystem_users."
         )
@@ -468,9 +474,11 @@ class DDSDataMover:
                         """
                     )
                 ).fetchall()
+            logger.info("Data recieved from stg.")
         except Exception:
+            logger.exception("Unable to get data from stg! Updating failed.")
             raise SQLError
-
+        logger.info("Collecting `DDSUser` object.")
         users = [
             DDSUser(
                 user_id=bl[1],
@@ -481,9 +489,10 @@ class DDSDataMover:
             for bl in bonus_users
             if ol[1] == bl[1]
         ]
-
+        logger.info("Inserting data into dds.dm_users.")
         try:
             with self.dwh_conn.begin() as conn:
+                logger.info("Processing...")
                 for row in users:
                     conn.execute(
                         statement=text(
@@ -499,15 +508,602 @@ class DDSDataMover:
                             """
                         )
                     )
+            logger.info(
+                f"dds.dm_users table was succesfully updated with {len(users)} rows."
+            )
+        except Exception:
+            logger.exception(
+                "Unable to insert data to dds.dm_users table! Updating failed."
+            )
+            raise SQLError
+
+    def load_restaurants(self) -> None:
+        logger.info("Loading dds.dm_restaurants table.")
+        logger.info("Getting data from stg.ordersystem_rastaurants.")
+
+        try:
+            with self.dwh_conn.begin() as conn:
+                restaurants = conn.execute(
+                    statement=text(
+                        f"""
+                        select id, object_id, object_value, update_ts
+                        from stg.ordersystem_restaurants
+                        where update_ts > '1900-01-01 00:00:00';
+                        """
+                    )
+                ).fetchall()
+                logger.info("Data recieved from stg.")
         except Exception:
             raise SQLError
 
+        logger.info("Collecting `DDSRestaurant` object.")
+        restaurants = [
+            DDSRestaurant(
+                restaurant_id=row[1],
+                restaurant_name=json.loads(row[2])["name"],
+                active_from=row[3],
+                active_to=datetime(2099, 12, 31, 00, 00, 00, 000),
+            )
+            for row in restaurants
+        ]
+        logger.info("Inserting data into dds.dm_restaurants.")
+        try:
+            with self.dwh_conn.begin() as conn:
+                logger.info("Processing...")
+                for row in restaurants:
+                    conn.execute(
+                        statement=text(
+                            f"""
+                            INSERT INTO
+                                dds.dm_restaurants(restaurant_id, restaurant_name, active_from, active_to)
+                            VALUES
+                                ('{row.restaurant_id}', '{row.restaurant_name}', '{row.active_from}', '{row.active_to}')
+                            ON CONFLICT (restaurant_id) DO UPDATE
+                            SET
+                                restaurant_name = excluded.restaurant_name,
+                                active_from = excluded.active_from,
+                                active_to = excluded.active_to;
+                            """
+                        )
+                    )
+            logger.info(
+                f"dds.dm_products table was succesfully updated with {len(restaurants)} rows."
+            )
+        except Exception:
+            logger.exception(
+                "Unable to insert data to dds.dm_restaurants table! Updating failed."
+            )
+            raise SQLError
 
-class CDMDataMover:
-    pass
+    def load_timestamps(self) -> None:
+        logger.info("Loading dds.dm_timestamps table.")
+        logger.info("Getting data from stg.ordersystem_orders.")
+
+        try:
+            with self.dwh_conn.begin() as conn:
+                timestamps = conn.execute(
+                    statement=text(
+                        f"""
+                        select object_value
+                        from stg.ordersystem_orders
+                        where update_ts > '1900-01-01 00:00:00';
+                        """
+                    )
+                ).fetchall()
+            logger.info("Data recieved from stg.")
+        except Exception:
+            logger.exception("Unable to get data from stg! Updating failed.")
+            raise SQLError
+
+        logger.info("Collecting `DDSTimestamp` object.")
+        timestamps = [
+            dict(
+                final_status=json.loads(row[0])["final_status"],
+                date=datetime.fromisoformat(json.loads(row[0])["date"]),
+            )
+            for row in timestamps
+            if json.loads(row[0])["final_status"] in ("CANCELLED", "CLOSED")
+        ]
+
+        timestamps = [
+            DDSTimestamp(
+                ts=row["date"].strftime("%Y-%m-%d %H:%M:%S"),
+                year=row["date"].year,
+                month=row["date"].month,
+                day=row["date"].day,
+                time=row["date"].strftime("%H:%M:%S"),
+                date=str(row["date"].date()),
+            )
+            for row in timestamps
+        ]
+        logger.info("Inserting data into dds.dm_timestamps.")
+        try:
+            with self.dwh_conn.begin() as conn:
+                logger.info("Processing...")
+                for row in timestamps:
+                    conn.execute(
+                        statement=text(
+                            f"""
+                            INSERT INTO
+                                dds.dm_timestamps(ts, year, month, day, time, date)
+                            VALUES
+                                ('{row.ts}', {row.year}, {row.month}, {row.day}, '{row.time}', '{row.date}')
+                            ON CONFLICT (ts) DO UPDATE
+                            SET
+                               year = excluded.year,
+                               month = excluded.month,
+                               day = excluded.day,
+                               time = excluded.time,
+                               date = excluded.date;
+                            """
+                        )
+                    )
+            logger.info(
+                f"dds.dm_timestamps table was succesfully updated with {len(timestamps)} rows."
+            )
+
+        except Exception:
+            logger.exception(
+                "Unable to insert data to dds.dm_timestamps table! Updating failed."
+            )
+            raise SQLError
+
+    def load_products(self) -> None:
+        logger.info("Loading dds.dm_products table.")
+        logger.info("Getting data from stg.ordersystem_rastaurants.")
+
+        try:
+            with self.dwh_conn.begin() as conn:
+                products = conn.execute(
+                    statement=text(
+                        f"""
+                        select object_id, object_value, update_ts
+                        from stg.ordersystem_restaurants
+                        where update_ts > '1900-01-01 00:00:00';
+                        """
+                    )  # TODO remove hardcode
+                ).fetchall()
+            logger.info("Data recieved from stg.")
+        except Exception:
+            logger.exception("Unable to get data from stg! Updating failed.")
+            raise SQLError
+
+        logger.info("Collecting `DDSProduct` object.")
+        products = [
+            DDSProduct(
+                restaurant_id=row[0],
+                product_id=r["_id"],
+                product_name=r["name"],
+                product_price=r["price"],
+                active_from=row[2],
+                active_to=datetime(2099, 12, 31, 00, 00, 00, 000),
+            )
+            for row in products
+            for r in json.loads(row[1])["menu"]
+        ]
+        logger.info("Starting updating process.")
+        with self.dwh_conn.begin() as conn:
+            logger.info("Processing...")
+            try:
+                logger.info("Creating temp table.")
+                conn.execute(
+                    text(
+                        """
+                        DROP TABLE IF EXISTS dm_products_tmp;
+                        CREATE LOCAL TEMP TABLE dm_products_tmp
+                        (
+                            restaurant_source_id varchar,
+                            product_id           varchar,
+                            product_name         varchar,
+                            product_price        float,
+                            active_from          timestamp,
+                            active_to            timestamp
+                        )
+                            ON COMMIT PRESERVE ROWS;
+                        """
+                    )
+                )
+                logger.info("Temp table created.")
+            except Exception:
+                logger.exception("Unable to create temp table!")
+                raise SQLError
+            try:
+                logger.info("Inserting data into temp table.")
+                for row in products:
+                    conn.execute(
+                        statement=text(
+                            f"""
+                            INSERT INTO
+                                dm_products_tmp (restaurant_source_id, product_id, product_name, product_price, active_from, active_to)
+                            VALUES
+                                ('{row.restaurant_id}', '{row.product_id}', '{row.product_name}', {row.product_price}, '{row.active_from}', '{row.active_to}');
+                            """
+                        )
+                    )
+                logger.info("Data was inserted.")
+            except Exception:
+                logger.exception("Unable to insert data into temp table!")
+
+            try:
+                logger.info("Inserting data into dds.dm_products.")
+                conn.execute(
+                    statement=text(
+                        """
+                        INSERT INTO
+                            dds.dm_products(restaurant_id, product_id, product_name, product_price, active_from, active_to)
+                        SELECT
+                            r.id AS restaurant_id,
+                            tmp.product_id,
+                            tmp.product_name,
+                            tmp.product_price,
+                            tmp.active_from,
+                            tmp.active_to
+                        FROM
+                            dm_products_tmp tmp
+                            JOIN (
+                                SELECT
+                                    id,
+                                    restaurant_id
+                                FROM dds.dm_restaurants
+                                ) r ON tmp.restaurant_source_id = r.restaurant_id
+                        ON CONFLICT (restaurant_id, product_id) DO UPDATE
+                            SET
+                                product_name  = excluded.product_name,
+                                product_price = excluded.product_price,
+                                active_from   = excluded.active_from,
+                                active_to     = excluded.active_to;
+
+                        DROP TABLE IF EXISTS dm_products_tmp;
+                        """
+                    )
+                )
+                logger.info("Data was inserted successfully.")
+            except Exception:
+                logger.exception(
+                    "Unable to insert data to dds.dm_products table! Updating failed."
+                )
+                raise SQLError
+        logger.info(
+            f"dds.dm_products table was succesfully updated with {len(products)} rows."
+        )
+
+    def load_orders(self) -> None:
+        logger.info("Loading dds.dm_orders table.")
+        logger.info("Getting data from stg.ordersystem_orders.")
+
+        try:
+            with self.dwh_conn.begin() as conn:
+                orders = conn.execute(
+                    statement=text(
+                        f"""
+                        select object_id, object_value, update_ts
+                        from stg.ordersystem_orders
+                        where update_ts > '1900-01-01 00:00:00';
+                        """
+                    )  # TODO remove hardcode
+                ).fetchall()
+            logger.info("Data recieved from stg.")
+        except Exception:
+            logger.exception("Unable to get data from stg! Updating failed.")
+            raise SQLError
+
+        logger.info("Collecting `DDSOrder` object.")
+        orders = [
+            DDSOrder(
+                order_key=row[0],
+                order_status=json.loads(row[1])["final_status"],
+                restaurant_id=json.loads(row[1])["restaurant"]["id"],
+                date=datetime.fromisoformat(json.loads(row[1])["date"]).strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                ),
+                user_id=json.loads(row[1])["user"]["id"],
+            )
+            for row in orders
+        ]
+
+        logger.info("Starting updating process.")
+        with self.dwh_conn.begin() as conn:
+            logger.info("Processing...")
+            try:
+                logger.info("Creating temp table.")
+                conn.execute(
+                    statement=text(
+                        """
+                        DROP TABLE IF EXISTS dm_orders_tmp;
+                        CREATE TEMP TABLE dm_orders_tmp
+                        (
+                            order_key            varchar,
+                            order_status         varchar,
+                            restaurant_source_id varchar,
+                            date_source          timestamp,
+                            user_source_id       varchar
+                        )
+                            ON COMMIT PRESERVE ROWS;
+                        """
+                    )
+                )
+                logger.info("Temp table created.")
+            except Exception:
+                logger.exception("Unable to create temp table!")
+                raise SQLError
+            try:
+                logger.info("Inserting data into temp table.")
+                for row in orders:
+                    conn.execute(
+                        statement=text(
+                            f"""
+                            INSERT INTO
+                                dm_orders_tmp (order_key, order_status, restaurant_source_id, date_source, user_source_id)
+                            VALUES
+                                ('{row.order_key}', '{row.order_status}', '{row.restaurant_id}', '{row.date}', '{row.user_id}');
+                            """
+                        )
+                    )
+                logger.info("Data was inserted.")
+            except Exception:
+                logger.exception("Unable to insert data into temp table!")
+
+            try:
+                logger.info("Inserting data into dds.dm_orders.")
+                conn.execute(
+                    statement=text(
+                        """
+                        INSERT INTO
+                            dds.dm_orders(order_key, order_status, user_id, restaurant_id, timestamp_id)
+                        SELECT
+                            DISTINCT
+                            tmp.order_key as order_key,
+                            tmp.order_status as order_status,
+                            u.id AS user_id,
+                            r.id AS restaurant_id,
+                            t.id AS timestamp_id
+                        FROM
+                            dm_orders_tmp AS tmp
+                            JOIN (
+                                SELECT
+                                    id,
+                                    user_id
+                                FROM dds.dm_users
+                                ) u ON tmp.user_source_id = u.user_id
+                            JOIN (
+                                SELECT
+                                    id,
+                                    restaurant_id
+                                FROM dds.dm_restaurants
+                                ) r ON tmp.restaurant_source_id = r.restaurant_id
+                            JOIN (
+                                SELECT
+                                    id,
+                                    ts
+                                FROM dds.dm_timestamps
+                                ) t ON tmp.date_source = t.ts
+                        ON CONFLICT (order_key) DO UPDATE
+                            SET
+                                order_status  = excluded.order_status,
+                                user_id       = excluded.user_id,
+                                restaurant_id = excluded.restaurant_id,
+                                timestamp_id  = excluded.timestamp_id;
+
+                        DROP TABLE IF EXISTS dm_orders_tmp;
+                        """
+                    )
+                )
+                logger.info("Data was inserted successfully.")
+            except Exception:
+                logger.exception(
+                    "Unable to insert data to dds.dm_orders table! Updating failed."
+                )
+                raise SQLError
+
+        logger.info(
+            f"dds.dm_orders table was succesfully updated with {len(orders)} rows."
+        )
+
+    def load_fct_product_sales(self) -> None:
+        logger.info("Loading dds.fct_product_sales table.")
+
+        with self.dwh_conn.begin() as conn:
+            try:
+                logger.info(
+                    "Getting bonus transactions data from stg.bonussystem_events."
+                )
+                bonus_raw = conn.execute(
+                    statement=text(
+                        f"""
+                        SELECT
+                            event_value,
+                            event_ts
+                        FROM stg.bonussystem_events
+                        WHERE 1 = 1
+                        AND event_type = 'bonus_transaction'
+                        AND event_ts > '1900-01-01 00:00:00';
+                        """
+                    )
+                ).fetchall()
+                logger.info("Bonus transactions data recieved from stg.")
+            except Exception:
+                logger.exception("Unable to get data from stg! Updating failed.")
+                raise SQLError
+
+            logger.info("Collecting `DDSFactProductSale` object.")
+            bonuses = [
+                DDSFactProductSale(
+                    order_id=json.loads(row[0])["order_id"],
+                    product_id=r["product_id"],
+                    price=r["price"],
+                    quantity=r["quantity"],
+                    bonus_payment=float(r["bonus_payment"]),
+                    bonus_grant=int(r["bonus_grant"]),
+                )
+                for row in bonus_raw
+                for r in json.loads(row[0])["product_payments"]
+            ]
+
+        logger.info("Starting updating process.")
+        with self.dwh_conn.begin() as conn:
+            logger.info("Processing...")
+            try:
+                logger.info("Creating temp table.")
+                conn.execute(
+                    statement=text(
+                        """
+                        DROP TABLE IF EXISTS fct_product_sales_tmp;
+                        CREATE TEMP TABLE fct_product_sales_tmp
+                        (
+                            order_source_id   varchar,
+                            product_source_id varchar,
+                            price             numeric(19, 5),
+                            quantity          int,
+                            bonus_payment     numeric(19, 5),
+                            bonus_grant       numeric(19, 5)
+                        )
+                            ON COMMIT PRESERVE ROWS;
+                        """
+                    )
+                )
+            except Exception:
+                logger.exception("Unable to create temp table!")
+                raise SQLError
+            try:
+                logger.info("Inserting data into temp table.")
+                for row in bonuses:
+                    conn.execute(
+                        statement=text(
+                            f"""
+                            INSERT INTO
+                                fct_product_sales_tmp(order_source_id, product_source_id, price, quantity, bonus_payment, bonus_grant)
+                            VALUES
+                                ('{row.order_id}', '{row.product_id}', {row.price}, {row.quantity}, {row.bonus_payment}, {row.bonus_grant});
+                            """
+                        )
+                    )
+                logger.info("Data was inserted.")
+            except Exception:
+                logger.exception("Unable to insert data into temp table!")
+
+            try:
+                logger.info("Inserting data into dds.fct_product_sales.")
+                conn.execute(
+                    statement=text(
+                        """
+                            INSERT INTO
+                                dds.fct_product_sales(product_id, order_id, count, price, total_sum, bonus_payment, bonus_grant)
+                            SELECT
+                                p.id                     AS product_id,
+                                o.id                     AS order_id,
+                                tmp.quantity             AS count,
+                                tmp.price                AS price,
+                                tmp.quantity * tmp.price AS total_sum,
+                                tmp.bonus_payment,
+                                tmp.bonus_grant
+                            FROM fct_product_sales_tmp tmp
+                                    JOIN (
+                                        SELECT
+                                            id,
+                                            product_id
+                                        FROM dds.dm_products
+                                        ) p ON tmp.product_source_id = p.product_id
+                                    JOIN (
+                                        SELECT
+                                            id,
+                                            order_key,
+                                            order_status
+                                        FROM dds.dm_orders
+                                        ) o ON tmp.order_source_id = o.order_key
+                            WHERE 1=1
+                            AND o.order_status = 'CLOSED'
+                            ON CONFLICT (product_id, order_id) DO UPDATE
+                                SET
+                                    count         = excluded.count,
+                                    price         = excluded.price,
+                                    total_sum     = excluded.total_sum,
+                                    bonus_payment = excluded.bonus_payment,
+                                    bonus_grant   = excluded.bonus_grant;
+
+                            DROP TABLE IF EXISTS fct_product_sales_tmp;
+                            """
+                    )
+                )
+                logger.info("Data was inserted successfully.")
+            except Exception:
+                logger.exception(
+                    "Unable to insert data to dds.fct_product_sales table! Updating failed."
+                )
+                raise SQLError
+        logger.info(
+            f"dds.fct_product_sales table was succesfully updated with {len(bonuses)} rows."
+        )
+
+
+class CDMDataLoader:
+    def __init__(self) -> None:
+        self.dwh_conn = DatabaseConnector(db="pg_dwh").connect_to_database()
+
+    def load_settlement_report(self) -> None:
+        logger.info("Starting data mart load process.")
+        try:
+            logger.info("Executing postgres query...")
+            with self.dwh_conn.begin() as conn:
+                conn.execute(
+                    statement=text(
+                        """
+                        INSERT INTO
+                            cdm.dm_settlement_report(restaurant_id, restaurant_name, settlement_date, orders_count, orders_total_sum, orders_bonus_payment_sum,
+                                                    orders_bonus_granted_sum, order_processing_fee, restaurant_reward_sum)
+                        SELECT
+                            dmr.id                                                                      AS restaurant_id,
+                            dmr.restaurant_name,
+                            dmt.date                                                                    AS settlement_date,
+                            COUNT(DISTINCT fct.order_id)                                                AS orders_count,
+                            SUM(fct.total_sum)                                                          AS orders_total_sum,
+                            SUM(fct.bonus_payment)                                                      AS orders_bonus_payment_sum,
+                            SUM(fct.bonus_grant)                                                        AS orders_bonus_granted_sum,
+                            SUM(fct.total_sum) * 0.25                                                   AS order_processing_fee,
+                            (SUM(fct.total_sum) - (SUM(fct.total_sum) * 0.25) - SUM(fct.bonus_payment)) AS restaurant_reward_sum
+                        FROM
+                            dds.dm_orders dmo
+                            LEFT JOIN dds.fct_product_sales fct ON dmo.id = fct.order_id
+                            LEFT JOIN (
+                                SELECT
+                                    id,
+                                    date
+                                FROM dds.dm_timestamps
+                                ) dmt ON dmo.timestamp_id = dmt.id
+                            LEFT JOIN (
+                                SELECT
+                                    id,
+                                    restaurant_id,
+                                    restaurant_name
+                                FROM dds.dm_restaurants
+                                WHERE 1 = 1
+                                AND active_to > CURRENT_TIMESTAMP::timestamp WITHOUT TIME ZONE
+                                ) dmr ON dmo.restaurant_id = dmr.id
+                        WHERE 1 = 1
+                        AND dmo.order_status = 'CLOSED'
+                        GROUP BY 1, 2, 3
+                        ON CONFLICT (restaurant_id, settlement_date) DO UPDATE
+                            SET
+                                restaurant_name          = excluded.restaurant_name,
+                                orders_count             = excluded.orders_count,
+                                orders_total_sum         = excluded.orders_total_sum,
+                                orders_bonus_payment_sum = excluded.orders_bonus_payment_sum,
+                                orders_bonus_granted_sum = excluded.orders_bonus_granted_sum,
+                                order_processing_fee     = excluded.order_processing_fee,
+                                restaurant_reward_sum    = excluded.restaurant_reward_sum;
+                        """
+                    )
+                )
+            logger.info("Data mart was updated successfully.")
+        except Exception:
+            logger.exception("Unable to execute query! Updating failed.")
 
 
 if __name__ == "__main__":
 
-    data_mover = DDSDataMover()
-    data_mover.load_users()
+    data_mover = CDMDataLoader()
+    # data_mover.load_users()
+    # data_mover.load_restaurants()
+    # data_mover.load_timestamps()
+    # data_mover.load_products()
+    # data_mover.load_orders()
+    data_mover.load_settlement_report()

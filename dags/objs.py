@@ -40,7 +40,7 @@ class CredentialHolder:
     user: str
     password: str
     database: str
-    ca_path: str | Path = None
+    ca_path: str = None
     repl_set: str = None
 
 
@@ -56,3 +56,50 @@ class DDSUser:
     user_id: str
     user_name: str
     user_login: str
+
+
+@dataclass
+class DDSRestaurant:
+    restaurant_id: str
+    restaurant_name: str
+    active_from: datetime
+    active_to: datetime
+
+
+@dataclass
+class DDSTimestamp:
+    ts: datetime
+    year: int
+    month: int
+    day: int
+    time: int
+    date: datetime
+
+
+@dataclass
+class DDSProduct:
+    restaurant_id: str
+    product_id: int
+    product_name: str
+    product_price: float
+    active_from: datetime
+    active_to: datetime
+
+
+@dataclass
+class DDSOrder:
+    order_key: str
+    order_status: str
+    restaurant_id: str
+    date: datetime
+    user_id: str
+
+
+@dataclass
+class DDSFactProductSale:
+    order_id: str
+    product_id: str
+    price: float
+    quantity: int
+    bonus_payment: float
+    bonus_grant: float

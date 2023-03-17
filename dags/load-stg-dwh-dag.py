@@ -3,47 +3,43 @@ from airflow.operators.empty import EmptyOperator
 from airflow.models.baseoperator import chain
 
 from datetime import datetime, timedelta
-from pathlib import Path
 
-from main import BonussystemDataMover, OrdersystemDataMover
-from utils import get_logger
+from main import STGBonussystemDataLoader, STGOrdersystemDataLoader
 
 DAG_START_DATE = datetime(2023, 3, 12)
 
-logger = get_logger(logger_name=str(Path(Path(__file__).name)))
-
-bonussystem_data_mover = BonussystemDataMover()
-ordersystem_data_mover = OrdersystemDataMover()
+bonussystem_data_loader = STGBonussystemDataLoader()
+ordersystem_data_loader = STGOrdersystemDataLoader()
 
 
 @task
-def load_bonussystem_ranks(data_mover: BonussystemDataMover) -> None:
-    data_mover.load_ranks_data()
+def load_bonussystem_ranks(data_loader: STGBonussystemDataLoader) -> None:
+    data_loader.load_ranks_data()
 
 
 @task
-def load_bonussystem_users(data_mover: BonussystemDataMover) -> None:
-    data_mover.load_users_data()
+def load_bonussystem_users(data_loader: STGBonussystemDataLoader) -> None:
+    data_loader.load_users_data()
 
 
 @task
-def load_bonussystem_outbox(data_mover: BonussystemDataMover) -> None:
-    data_mover.load_outbox_data()
+def load_bonussystem_outbox(data_loader: STGBonussystemDataLoader) -> None:
+    data_loader.load_outbox_data()
 
 
 @task
-def load_ordersystem_restaurants(data_mover: OrdersystemDataMover) -> None:
-    data_mover.load_restaurants()
+def load_ordersystem_restaurants(data_loader: STGOrdersystemDataLoader) -> None:
+    data_loader.load_restaurants()
 
 
 @task
-def load_ordersystem_users(data_mover: OrdersystemDataMover) -> None:
-    data_mover.load_users()
+def load_ordersystem_users(data_loader: STGOrdersystemDataLoader) -> None:
+    data_loader.load_users()
 
 
 @task
-def load_ordersystem_orders(data_mover: OrdersystemDataMover) -> None:
-    data_mover.load_orders()
+def load_ordersystem_orders(data_loader: STGOrdersystemDataLoader) -> None:
+    data_loader.load_orders()
 
 
 @dag(
@@ -55,20 +51,22 @@ def load_ordersystem_orders(data_mover: OrdersystemDataMover) -> None:
     default_args={
         "owner": "leonide",
         "retries": 5,
-        "retry_delay": timedelta(minutes=10),
+        "retry_delay": timedelta(seconds=30),
     },
 )
 def taskflow() -> None:
 
     start = EmptyOperator(task_id="starting")
 
-    bonus_ranks = load_bonussystem_ranks(data_mover=bonussystem_data_mover)
-    bonus_users = load_bonussystem_users(data_mover=bonussystem_data_mover)
-    bonus_outbox = load_bonussystem_outbox(data_mover=bonussystem_data_mover)
+    bonus_ranks = load_bonussystem_ranks(data_loader=bonussystem_data_loader)
+    bonus_users = load_bonussystem_users(data_loader=bonussystem_data_loader)
+    bonus_outbox = load_bonussystem_outbox(data_loader=bonussystem_data_loader)
 
-    order_restaurants = load_ordersystem_restaurants(data_mover=ordersystem_data_mover)
-    order_users = load_ordersystem_users(data_mover=ordersystem_data_mover)
-    order_orders = load_ordersystem_orders(data_mover=ordersystem_data_mover)
+    order_restaurants = load_ordersystem_restaurants(
+        data_loader=ordersystem_data_loader
+    )
+    order_users = load_ordersystem_users(data_loader=ordersystem_data_loader)
+    order_orders = load_ordersystem_orders(data_loader=ordersystem_data_loader)
 
     end = EmptyOperator(task_id="ending")
 
