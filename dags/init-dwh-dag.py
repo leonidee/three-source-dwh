@@ -3,6 +3,7 @@ from sqlalchemy.engine import Engine
 from datetime import datetime, timedelta
 from pathlib import Path
 import sys
+import logging
 
 # airflow
 from airflow.decorators import task, dag
@@ -13,13 +14,13 @@ from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 # package
 sys.path.append(str(Path(__file__).parent.parent))
 
-from pkg.utils import DatabaseConnector, get_logger
+from pkg.utils import DatabaseConnector
 from pkg.errors import SQLError, FSError
 
 DWH_DDL_SQL = Path(Path(__file__).parent.parent, "sql/init-dwh-ddl.sql")
 DAG_START_DATE = datetime(2023, 3, 12)
 
-logger = get_logger(logger_name=str(Path(Path(__file__).name)))
+logger = logging.getLogger(name="airflow.task")
 
 engine = DatabaseConnector(db="pg_dwh").connect_to_database()
 
