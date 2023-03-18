@@ -1,14 +1,20 @@
 from datetime import datetime
-from typing import List, Any, Literal
-from datetime import datetime
 import json
 from pathlib import Path
+import sys
+import logging
 
-from pymongo.cursor import Cursor
 from sqlalchemy import text
 
-from utils import get_logger, DatabaseConnector, StgEtlSyncer, DDSEtlSyncer
-from objs import (
+# typing
+from pymongo.cursor import Cursor
+from typing import List, Any, Literal
+
+# package
+sys.path.append(str(Path(__file__).parent.parent))
+
+from pkg.utils import DatabaseConnector, StgEtlSyncer, DDSEtlSyncer
+from pkg.objs import (
     BonussystemRankObj,
     BonussystemUserObj,
     BonussystemOutboxObj,
@@ -20,10 +26,10 @@ from objs import (
     DDSOrder,
     DDSFactProductSale,
 )
-from errors import SQLError, MongoServiceError
+from pkg.errors import SQLError, MongoServiceError
 
-
-logger = get_logger(logger_name=str(Path(Path(__file__).name)))
+# gets airflow default logger and use it 
+logger = logging.getLogger("airflow.task")
 
 
 class STGBonussystemDataLoader:

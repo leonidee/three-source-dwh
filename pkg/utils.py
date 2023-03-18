@@ -1,7 +1,9 @@
-import logging
 import json
 from datetime import datetime
 import sys
+
+# logging
+import logging
 
 # fs
 from pathlib import Path
@@ -17,29 +19,12 @@ from typing import Literal, Union, List, Any
 from sqlalchemy.engine import Engine
 
 # package
-from objs import CredentialHolder, EtlObj, OrdersystemObj
-from errors import DotEnvError, DatabaseConnectionError, SQLError
+sys.path.append(str(Path(__file__).parent.parent))
 
+from pkg.objs import CredentialHolder, EtlObj, OrdersystemObj
+from pkg.errors import DotEnvError, DatabaseConnectionError, SQLError
 
-def get_logger(logger_name: str) -> logging.Logger:
-
-    logger = logging.getLogger(name=logger_name)
-
-    logger.setLevel(level=logging.INFO)
-
-    formatter = logging.Formatter(
-        fmt="[%(asctime)s] {%(name)s:%(lineno)d} %(levelname)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-
-    logger_handler = logging.StreamHandler(stream=sys.stdout)
-    logger_handler.setFormatter(formatter)
-    logger.addHandler(logger_handler)
-
-    return logger
-
-
-logger = get_logger(logger_name=str(Path(Path(__file__).name)))
+logger = logging.getLogger(name="airflow.task")
 
 
 class DatabaseConnector:
@@ -407,4 +392,4 @@ class DDSEtlSyncer:
 
 if __name__ == "__main__":
 
-    conn = DatabaseConnector(db="mongo_source").connect_to_database()
+    pass

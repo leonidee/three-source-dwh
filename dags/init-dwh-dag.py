@@ -2,16 +2,21 @@ from pathlib import Path
 from sqlalchemy.engine import Engine
 from datetime import datetime, timedelta
 from pathlib import Path
+import sys
 
+# airflow
 from airflow.decorators import task, dag
 from airflow.operators.empty import EmptyOperator
 from airflow.models.baseoperator import chain
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
-from utils import DatabaseConnector, get_logger
-from errors import SQLError, FSError
+# package
+sys.path.append(str(Path(__file__).parent.parent))
 
-DWH_DDL_SQL = "sql/init-dwh-ddl.sql"
+from pkg.utils import DatabaseConnector, get_logger
+from pkg.errors import SQLError, FSError
+
+DWH_DDL_SQL = Path(Path(__file__).parent.parent, "sql/init-dwh-ddl.sql")
 DAG_START_DATE = datetime(2023, 3, 12)
 
 logger = get_logger(logger_name=str(Path(Path(__file__).name)))

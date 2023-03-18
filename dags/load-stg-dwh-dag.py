@@ -1,10 +1,16 @@
+from datetime import datetime, timedelta
+import sys
+from pathlib import Path
+
+# airflow
 from airflow.decorators import dag, task
 from airflow.operators.empty import EmptyOperator
 from airflow.models.baseoperator import chain
 
-from datetime import datetime, timedelta
+# package
+sys.path.append(str(Path(__file__).parent.parent))
 
-from main import STGBonussystemDataLoader, STGOrdersystemDataLoader
+from pkg.main import STGBonussystemDataLoader, STGOrdersystemDataLoader
 
 DAG_START_DATE = datetime(2023, 3, 12)
 
