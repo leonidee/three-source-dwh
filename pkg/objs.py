@@ -4,6 +4,14 @@ from dataclasses import dataclass
 
 
 @dataclass
+class EtlObj:
+    id: int
+    workflow_key: str
+    workflow_settings: Dict
+
+
+# STG loading objects
+@dataclass
 class BonussystemUserObj:
     id: int
     order_user_id: str
@@ -26,30 +34,20 @@ class BonussystemOutboxObj:
 
 
 @dataclass
-class EtlObj:
-    id: int
-    workflow_key: str
-    workflow_settings: Dict
-
-
-@dataclass
-class CredentialHolder:
-    host: str
-    port: str
-    user: str
-    password: str
-    database: str
-    ca_path: str = None
-    repl_set: str = None
-
-
-@dataclass
 class OrdersystemObj:
     object_id: str
     object_value: Dict
     update_ts: datetime
 
 
+@dataclass
+class DeliverySystemObj:
+    object_id: str
+    object_value: dict
+    update_ts: datetime
+
+
+# DDS loading objects
 @dataclass
 class DDSUser:
     user_id: str
@@ -102,3 +100,49 @@ class DDSFactProductSale:
     quantity: int
     bonus_payment: float
     bonus_grant: float
+
+
+@dataclass
+class DDSCourier:
+    courier_id: str
+    courier_name: str
+    active_from: datetime
+    active_to: datetime
+
+
+@dataclass
+class DDSDimDeliveries:
+    delivery_id: str
+    delivery_ts: datetime
+    courier_id: str
+    order_id: str
+
+
+@dataclass
+class DDSFctDeliveries:
+    delivery_id: str
+    address: str
+    rate: int
+    order_sum: float
+    tip_sum: float
+
+
+# holders
+
+
+@dataclass
+class CredentialHolder:
+    host: str
+    port: str
+    user: str
+    password: str
+    database: str
+    ca_path: str = None
+    repl_set: str = None
+
+
+@dataclass
+class HeadersHolder:
+    apikey: str
+    nickname: str
+    cohort: int

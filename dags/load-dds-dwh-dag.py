@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 # airflow
-from airflow.decorators import dag, task
+from airflow.decorators import dag
 from airflow.operators.empty import EmptyOperator
 from airflow.models.baseoperator import chain
 
@@ -12,39 +12,21 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from pkg.main import DDSDataLoader
 
+from pkg.tasks import (
+    load_users,
+    load_restaurants,
+    load_timestamps,
+    load_products,
+    load_orders,
+    load_fct_product_sales,
+    load_couriers,
+    load_dim_deliveries,
+    load_fct_deliveries,
+)
+
 DAG_START_DATE = datetime(2023, 3, 12)
 
 data_loader = DDSDataLoader()
-
-
-@task
-def load_users(data_loader: DDSDataLoader) -> None:
-    data_loader.load_users()
-
-
-@task
-def load_restaurants(data_loader: DDSDataLoader) -> None:
-    data_loader.load_restaurants()
-
-
-@task
-def load_timestamps(data_loader: DDSDataLoader) -> None:
-    data_loader.load_timestamps()
-
-
-@task
-def load_products(data_loader: DDSDataLoader) -> None:
-    data_loader.load_products()
-
-
-@task
-def load_orders(data_loader: DDSDataLoader) -> None:
-    data_loader.load_orders()
-
-
-@task
-def load_fct_product_sales(data_loader: DDSDataLoader) -> None:
-    data_loader.load_fct_product_sales()
 
 
 @dag(
@@ -68,12 +50,24 @@ def taskflow() -> None:
     timestamps = load_timestamps(data_loader=data_loader)
     products = load_products(data_loader=data_loader)
     orders = load_orders(data_loader=data_loader)
+    couriers = load_couriers(data_loader=data_loader)
+    dim_deliveries = load_dim_deliveries(data_loader=data_loader)
+    fct_deliveries = load_fct_deliveries(data_loader=data_loader)
 
     fct_sales = load_fct_product_sales(data_loader=data_loader)
 
     end = EmptyOperator(task_id="ending")
 
-    chain(start, [users, restaurants, timestamps], products, orders, fct_sales, end)
+    chain(
+        start,
+        [users, restaurants, timestamps, couriers],
+        products,
+        orders,
+        dim_deliveries,
+        fct_sales,
+        fct_deliveries,
+        end,
+    )
 
 
 dag = taskflow()

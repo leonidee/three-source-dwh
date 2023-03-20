@@ -16,3 +16,7 @@ class MongoServiceError(Exception):
 
 class FSError(Exception):
     pass
+
+
+class APIServiceError(Exception):
+    pass

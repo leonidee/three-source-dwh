@@ -1,10 +1,15 @@
-from datetime import datetime
 import json
 from pathlib import Path
 import sys
 import logging
+from itertools import chain
+import requests
 
 from sqlalchemy import text
+
+# date & time
+from datetime import datetime, timedelta
+import time
 
 # typing
 from pymongo.cursor import Cursor
@@ -13,22 +18,26 @@ from typing import List, Any, Literal
 # package
 sys.path.append(str(Path(__file__).parent.parent))
 
-from pkg.utils import DatabaseConnector, StgEtlSyncer, DDSEtlSyncer
+from pkg.utils import DatabaseConnector, HeadersGetter, StgEtlSyncer, DDSEtlSyncer
 from pkg.objs import (
     BonussystemRankObj,
     BonussystemUserObj,
     BonussystemOutboxObj,
     OrdersystemObj,
+    DeliverySystemObj,
     DDSUser,
     DDSRestaurant,
     DDSTimestamp,
     DDSProduct,
     DDSOrder,
     DDSFactProductSale,
+    DDSCourier,
+    DDSDimDeliveries,
+    DDSFctDeliveries,
 )
-from pkg.errors import SQLError, MongoServiceError
+from pkg.errors import SQLError, MongoServiceError, APIServiceError
 
-# gets airflow default logger and use it 
+# gets airflow default logger and use it
 logger = logging.getLogger("airflow.task")
 
 
@@ -449,6 +458,248 @@ class STGOrdersystemDataLoader:
             raise SQLError
 
 
+class STGDeliverySystemDataLoader:
+    def __init__(self) -> None:
+        self.dwh_conn = DatabaseConnector(db="pg_dwh").connect_to_database()
+        self.headers = HeadersGetter._get_headers()
+
+    def load_restaurants(self) -> None:
+        logger.info("Starting loading process for restaurants data.")
+
+        SORT_FIELD = "_id"  # field to sort by. values: 'id', 'name'
+        SORT_DIRECTION = "asc"  # values: 'acs', 'desc'
+        LIMIT = 50  # int from 0 to 50 exclusive
+        OFFSET = 0
+        METHOD = "restaurants"
+
+        attempt = 1
+        max_attempts = 8
+
+        for _ in range(max_attempts + 1):
+            logger.info(f"Sending request to API. Attempt {attempt}.")
+            try:
+                response = requests.get(
+                    url=f"https://d5d04q7d963eapoepsqr.apigw.yandexcloud.net/{METHOD}?sort_field={SORT_FIELD}&sort_direction={SORT_DIRECTION}&limit={LIMIT}&offset={OFFSET}",
+                    headers=self.headers,
+                ).json()
+                logger.info("Response recieved. 😎")
+                break
+            except:
+                logger.exception("Response wasn't recieved!")
+                attempt += 1
+
+                if attempt == max_attempts:
+                    logger.info("API is not responding! No more attempts left.")
+                    raise APIServiceError
+
+                time.sleep(10)
+                logger.info("Give me another try.")
+
+        logger.info("Collecting `DeliverySystemObj` objects.")
+        collection = [
+            DeliverySystemObj(
+                object_id=row["_id"],
+                object_value=json.dumps(
+                    obj=(dict(name=row["name"])), ensure_ascii=False
+                ),
+                update_ts=datetime.today().strftime("%Y-%m-%d %H:%M:%S"),
+            )
+            for row in response
+        ]
+        logger.info("Inserting data into `stg.deliverysystem_restaurants` table.")
+        try:
+            with self.dwh_conn.begin() as conn:
+                for row in collection:
+                    conn.execute(
+                        statement=text(
+                            f"""
+                            INSERT INTO
+                                stg.deliverysystem_restaurants(object_id, object_value, update_ts)
+                            VALUES
+                                ('{row.object_id}', '{row.object_value}', '{row.update_ts}')
+                            ON CONFLICT (object_id) DO UPDATE
+                                SET
+                                    object_value = excluded.object_value,
+                                    update_ts    = excluded.update_ts;
+                            """
+                        )
+                    )
+            logger.info("Data was inserted successfully!")
+        except Exception:
+            logger.exception(
+                "Unable to insert data into `stg.deliverysystem_restaurants` table. Loading process failed."
+            )
+            raise SQLError
+
+    def load_couriers(self) -> None:
+        logger.info("Starting loading process for couriers data.")
+
+        SORT_FIELD = "_id"  # field to sort by. values: 'id', 'name'
+        SORT_DIRECTION = "asc"  # values: 'acs', 'desc'
+        LIMIT = 50  # int from 0 to 50 exclusive
+        OFFSET = 0
+        METHOD = "couriers"
+
+        attempt = 1
+        max_attempts = 8
+
+        collection = []
+
+        for _ in range(max_attempts + 1):
+            logger.info(f"Sending request to API. Attempt {attempt}.")
+            try:
+                for i in range(5):
+                    response = requests.get(
+                        url=f"https://d5d04q7d963eapoepsqr.apigw.yandexcloud.net/{METHOD}?sort_field={SORT_FIELD}&sort_direction={SORT_DIRECTION}&limit={LIMIT}&offset={OFFSET}",
+                        headers=self.headers,
+                    ).json()
+                    x = [
+                        DeliverySystemObj(
+                            object_id=row["_id"],
+                            object_value=json.dumps(
+                                dict(name=row["name"]), ensure_ascii=False
+                            ),
+                            update_ts=datetime.today().strftime("%Y-%m-%d %H:%M:%S"),
+                        )
+                        for row in response
+                    ]
+                    collection.append(x)
+                    OFFSET += 50
+                logger.info("Response recieved. 😎")
+                break
+            except:
+                logger.exception("Response wasn't recieved!")
+                attempt += 1
+
+                if attempt == max_attempts:
+                    logger.info("API is not responding! No more attempts left.")
+                    raise APIServiceError
+
+                time.sleep(10)
+                logger.info("Give me another try.")
+
+        logger.info("Collecting `DeliverySystemObj` objects.")
+
+        collection = list(chain(*collection))
+        logger.info(f"Objects collected with {len(collection)} elements.")
+
+        logger.info("Insering data into `stg.deliverysystem_couriers` table.")
+        try:
+            with self.dwh_conn.begin() as conn:
+                for row in collection:
+                    conn.execute(
+                        statement=text(
+                            f"""
+                            INSERT INTO
+                                stg.deliverysystem_couriers(object_id, object_value, update_ts)
+                            VALUES
+                                ('{row.object_id}', '{row.object_value}', '{row.update_ts}')
+                            ON CONFLICT (object_id) DO UPDATE
+                                SET
+                                    object_value = excluded.object_value,
+                                    update_ts    = excluded.update_ts;
+                            """
+                        )
+                    )
+            logger.info("Data was inserted successfully!")
+        except Exception:
+            logger.exception(
+                "Unable to insert data into `stg.deliverysystem_couriers` table. Loading process failed."
+            )
+            raise SQLError
+
+    def load_deliveries(self) -> None:
+        logger.info("Starting loading process for deliveries data.")
+
+        SORT_FIELD = "date"  # field to sort by. values: 'id', 'name'
+        SORT_DIRECTION = "asc"  # values: 'acs', 'desc'
+        FROM = (datetime.today().date() - timedelta(days=7)).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+        TO = datetime.today().date().strftime("%Y-%m-%d %H:%M:%S")
+        LIMIT = 50  # int from 0 to 50 exclusive
+        OFFSET = 0
+        METHOD = "deliveries"
+
+        attempt = 1
+        max_attempts = 8
+
+        collection = []
+
+        for _ in range(max_attempts + 1):
+            logger.info(f"Sending request to API. Attempt {attempt}.")
+            try:
+                for i in range(50):
+                    response = requests.get(
+                        url=f"https://d5d04q7d963eapoepsqr.apigw.yandexcloud.net/{METHOD}?from={FROM}&to={TO}&sort_field={SORT_FIELD}&sort_direction={SORT_DIRECTION}&limit={LIMIT}&offset={OFFSET}",
+                        headers=self.headers,
+                    ).json()
+                    x = [
+                        DeliverySystemObj(
+                            object_id=row["order_id"],
+                            object_value=json.dumps(
+                                dict(
+                                    order_ts=row["order_ts"],
+                                    delivery_id=row["delivery_id"],
+                                    courier_id=row["courier_id"],
+                                    address=row["address"],
+                                    delivery_ts=row["delivery_ts"],
+                                    rate=row["rate"],
+                                    sum=row["sum"],
+                                    tip_sum=row["tip_sum"],
+                                ),
+                                ensure_ascii=False,
+                            ),
+                            update_ts=datetime.today().strftime("%Y-%m-%d %H:%M:%S"),
+                        )
+                        for row in response
+                    ]
+                    collection.append(x)
+                    OFFSET += 50
+                logger.info("Response recieved. 😎")
+                break
+            except:
+                logger.exception("Response wasn't recieved!")
+                attempt += 1
+
+                if attempt == max_attempts:
+                    logger.info("API is not responding! No more attempts left.")
+                    raise APIServiceError
+
+                time.sleep(10)
+                logger.info("Give me another try.")
+
+        logger.info("Collecting `DeliverySystemObj` objects.")
+
+        collection = list(chain(*collection))
+        logger.info(f"Objects collected with {len(collection)} elements.")
+
+        logger.info("Insering data into `stg.deliverysystem_deliveries` table.")
+        try:
+            with self.dwh_conn.begin() as conn:
+                for row in collection:
+                    conn.execute(
+                        statement=text(
+                            f"""
+                            INSERT INTO
+                                stg.deliverysystem_deliveries(object_id, object_value, update_ts)
+                            VALUES
+                                ('{row.object_id}', '{row.object_value}', '{row.update_ts}')
+                            ON CONFLICT (object_id) DO UPDATE
+                                SET
+                                    object_value = excluded.object_value,
+                                    update_ts    = excluded.update_ts;
+                            """
+                        )
+                    )
+            logger.info("Data was inserted successfully!")
+        except Exception:
+            logger.exception(
+                "Unable to insert data into `stg.deliverysystem_deliveries` table. Loading process failed."
+            )
+            raise SQLError
+
+
 class DDSDataLoader:
     def __init__(self) -> None:
         self.dwh_conn = DatabaseConnector(db="pg_dwh").connect_to_database()
@@ -583,11 +834,11 @@ class DDSDataLoader:
 
     def load_timestamps(self) -> None:
         logger.info("Loading dds.dm_timestamps table.")
-        logger.info("Getting data from stg.ordersystem_orders.")
 
         try:
+            logger.info("Getting data from stg.ordersystem_orders.")
             with self.dwh_conn.begin() as conn:
-                timestamps = conn.execute(
+                orders_ts = conn.execute(
                     statement=text(
                         f"""
                         select object_value
@@ -601,32 +852,51 @@ class DDSDataLoader:
             logger.exception("Unable to get data from stg! Updating failed.")
             raise SQLError
 
-        logger.info("Collecting `DDSTimestamp` object.")
-        timestamps = [
-            dict(
-                final_status=json.loads(row[0])["final_status"],
-                date=datetime.fromisoformat(json.loads(row[0])["date"]),
-            )
-            for row in timestamps
+        orders_ts = [
+            datetime.fromisoformat(json.loads(row[0])["date"])
+            for row in orders_ts
             if json.loads(row[0])["final_status"] in ("CANCELLED", "CLOSED")
         ]
+        try:
+            logger.info("Getting data from stg.deliverysystem_deliveries.")
+            with self.dwh_conn.begin() as conn:
+                dels_ts = conn.execute(
+                    statement=text(
+                        f"""
+                        select object_value
+                        from stg.deliverysystem_deliveries
+                        where update_ts > '1900-01-01 00:00:00';
+                        """
+                    )
+                ).fetchall()
+            logger.info("Data recieved from stg.")
+        except Exception:
+            logger.exception("Unable to get data from stg! Updating failed.")
+            raise SQLError
 
-        timestamps = [
+        dels_ts = [datetime.fromisoformat(row[0]["delivery_ts"]) for row in dels_ts]
+
+        logger.info("Collecting `DDSTimestamp` object.")
+
+        dels_ts.extend(orders_ts)
+        ts = [*set(dels_ts)]
+
+        collection = [
             DDSTimestamp(
-                ts=row["date"].strftime("%Y-%m-%d %H:%M:%S"),
-                year=row["date"].year,
-                month=row["date"].month,
-                day=row["date"].day,
-                time=row["date"].strftime("%H:%M:%S"),
-                date=str(row["date"].date()),
+                ts=row.strftime("%Y-%m-%d %H:%M:%S"),
+                year=row.year,
+                month=row.month,
+                day=row.day,
+                time=row.strftime("%H:%M:%S"),
+                date=str(row.date()),
             )
-            for row in timestamps
+            for row in ts
         ]
         logger.info("Inserting data into dds.dm_timestamps.")
         try:
             with self.dwh_conn.begin() as conn:
                 logger.info("Processing...")
-                for row in timestamps:
+                for row in collection:
                     conn.execute(
                         statement=text(
                             f"""
@@ -645,12 +915,78 @@ class DDSDataLoader:
                         )
                     )
             logger.info(
-                f"dds.dm_timestamps table was succesfully updated with {len(timestamps)} rows."
+                f"dds.dm_timestamps table was succesfully updated with {len(collection)} rows."
             )
 
         except Exception:
             logger.exception(
                 "Unable to insert data to dds.dm_timestamps table! Updating failed."
+            )
+            raise SQLError
+
+    def load_couriers(self) -> None:
+        logger.info("Loading dds.dm_couriers table.")
+        logger.info("Getting data from stg.deliverysystem_couriers.")
+
+        try:
+            with self.dwh_conn.begin() as conn:
+                raw = conn.execute(
+                    statement=text(
+                        f"""
+                        SELECT
+                            object_id,
+                            object_value,
+                            update_ts
+                        FROM stg.deliverysystem_couriers
+                        WHERE 1 = 1
+                        AND update_ts > '1900-01-01 00:00:00';
+                        """
+                    )
+                ).fetchall()
+            logger.info("Data recieved from stg.")
+        except Exception:
+            logger.exception("Unable to get data from stg! Updating failed.")
+            raise SQLError
+
+        logger.info("Collecting `DDSCourier` objects.")
+        collection = [
+            DDSCourier(
+                courier_id=row[0],
+                courier_name=row[1]["name"],
+                active_from=row[2],
+                active_to=datetime(
+                    2099, 12, 31, 00, 00, 00, 000  # TODO can we get rid of hardcode?
+                ),
+            )
+            for row in raw
+        ]
+        logger.info("Inserting data into dds.dm_couriers")
+        try:
+            with self.dwh_conn.begin() as conn:
+                logger.info("Processing...")
+                for row in collection:
+                    conn.execute(
+                        statement=text(
+                            f"""
+                            INSERT INTO
+                                dds.dm_couriers(courier_id, courier_name, active_from, active_to)
+                            VALUES
+                                ('{row.courier_id}', '{row.courier_name}', '{row.active_from}', '{row.active_to}')
+                            ON CONFLICT (courier_id) DO UPDATE
+                                SET
+                                    courier_name = excluded.courier_name,
+                                    active_from  = excluded.active_from,
+                                    active_to    = excluded.active_to;
+                            """
+                        )
+                    )
+            logger.info(
+                f"dds.dm_couriers table was succesfully updated with {len(collection)} rows."
+            )
+
+        except Exception:
+            logger.exception(
+                "Unable to insert data to dds.dm_couriers table! Updating failed."
             )
             raise SQLError
 
@@ -905,6 +1241,137 @@ class DDSDataLoader:
             f"dds.dm_orders table was succesfully updated with {len(orders)} rows."
         )
 
+    def load_dim_deliveries(self) -> None:
+        logger.info("Loading dds.dm_deliveries table.")
+
+        try:
+            logger.info("Getting data from stg.deliverysystem_deliveries.")
+            with self.dwh_conn.begin() as conn:
+                raw = conn.execute(
+                    statement=text(
+                        f"""
+                        SELECT
+                            object_id,
+                            object_value,
+                            update_ts
+                        FROM stg.deliverysystem_deliveries
+                        WHERE 1 = 1
+                        AND update_ts > '1900-01-01 00:00:00';
+                        """
+                    )  # TODO remove hardcode
+                ).fetchall()
+            logger.info("Data recieved from stg.")
+        except Exception:
+            logger.exception("Unable to get data from stg! Updating failed.")
+            raise SQLError
+
+        logger.info("Collecting `DDSDimDeliveries` object.")
+
+        collection = [
+            DDSDimDeliveries(
+                delivery_id=row[1]["delivery_id"],
+                delivery_ts=datetime.fromisoformat(row[1]["delivery_ts"]).strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                ),
+                courier_id=row[1]["courier_id"],
+                order_id=row[0],
+            )
+            for row in raw
+        ]
+        logger.info("Starting updating process.")
+        with self.dwh_conn.begin() as conn:
+            logger.info("Processing...")
+            try:
+                logger.info("Creating temp table.")
+                conn.execute(
+                    text(
+                        """
+                        DROP TABLE IF EXISTS dm_deliveries_tmp;
+                        CREATE TEMP TABLE dm_deliveries_tmp
+                        (
+                            delivery_source_id varchar,
+                            delivery_ts        timestamp,
+                            courier_source_id  varchar,
+                            order_source_id    varchar
+                        )
+                            ON COMMIT PRESERVE ROWS;
+                        """
+                    )
+                )
+                logger.info("Temp table created.")
+            except Exception:
+                logger.exception("Unable to create temp table!")
+                raise SQLError
+
+            try:
+                logger.info("Inserting data into temp table.")
+                for row in collection:
+                    conn.execute(
+                        statement=text(
+                            f"""
+                            INSERT INTO
+                                dm_deliveries_tmp(delivery_source_id, delivery_ts, courier_source_id, order_source_id)
+                            VALUES
+                                ('{row.delivery_id}', '{row.delivery_ts}', '{row.courier_id}', '{row.order_id}');
+                            """
+                        )
+                    )
+                logger.info("Data was inserted.")
+            except Exception:
+                logger.exception("Unable to insert data into temp table!")
+                raise SQLError
+
+            try:
+                logger.info("Inserting data into dds.dm_deliveries.")
+                conn.execute(
+                    statement=text(
+                        """
+                        INSERT INTO
+                            dds.dm_deliveries(delivery_id, timestamp_id, courier_id, order_id)
+                        SELECT
+                            tmp.delivery_source_id AS delivery_id,
+                            ts.id                  AS timestamp_id,
+                            c.id                   AS courier_id,
+                            o.id                   AS order_id
+                        FROM
+                            dm_deliveries_tmp tmp
+                            LEFT JOIN (
+                                SELECT
+                                    id,
+                                    ts
+                                FROM dds.dm_timestamps
+                                ) ts ON tmp.delivery_ts = ts.ts
+                            LEFT JOIN (
+                                SELECT
+                                    id,
+                                    courier_id
+                                FROM dds.dm_couriers
+                                ) c ON tmp.courier_source_id = c.courier_id
+                            LEFT JOIN (
+                                SELECT
+                                    id,
+                                    order_key
+                                FROM dds.dm_orders
+                                ) o ON tmp.order_source_id = o.order_key
+                        ON CONFLICT (delivery_id) DO UPDATE
+                            SET
+                                timestamp_id = excluded.timestamp_id,
+                                courier_id   = excluded.courier_id,
+                                order_id     = excluded.order_id;
+                        """
+                    )
+                )
+                logger.info("Data was inserted successfully.")
+            except Exception:
+                logger.exception(
+                    "Unable to insert data to dds.dm_deliveries table! Updating failed."
+                )
+                raise SQLError
+
+        logger.info(
+            f"dds.dm_deliveries table was succesfully updated with {len(collection)} rows."
+        )
+
     def load_fct_product_sales(self) -> None:
         logger.info("Loading dds.fct_product_sales table.")
 
@@ -1040,13 +1507,140 @@ class DDSDataLoader:
             f"dds.fct_product_sales table was succesfully updated with {len(bonuses)} rows."
         )
 
+    def load_fct_deliveries(self) -> None:
+        logger.info("Loading dds.fct_deliveries table.")
+
+        try:
+            logger.info("Getting data from stg.deliverysystem_deliveries.")
+            with self.dwh_conn.begin() as conn:
+                raw = conn.execute(
+                    statement=text(
+                        f"""
+                        SELECT
+                            object_value,
+                            update_ts
+                        FROM stg.deliverysystem_deliveries
+                        WHERE 1 = 1
+                        AND update_ts > '1900-01-01 00:00:00';
+                        """
+                    )  # TODO remove hardcode
+                ).fetchall()
+            logger.info("Data recieved from stg.")
+        except Exception:
+            logger.exception("Unable to get data from stg! Updating failed.")
+            raise SQLError
+
+        logger.info("Collecting `DDSFctDeliveries` object.")
+
+        collection = [
+            DDSFctDeliveries(
+                delivery_id=row[0]["delivery_id"],
+                address=row[0]["address"],
+                rate=row[0]["rate"],
+                order_sum=row[0]["sum"],
+                tip_sum=row[0]["tip_sum"],
+            )
+            for row in raw
+        ]
+        logger.info("Starting updating process.")
+        with self.dwh_conn.begin() as conn:
+            logger.info("Processing...")
+            try:
+                logger.info("Creating temp table.")
+                conn.execute(
+                    statement=text(
+                        """
+                        DROP TABLE IF EXISTS fct_deliveries_tmp;
+                        CREATE TEMP TABLE fct_deliveries_tmp
+                        (
+                            delivery_sourse_id varchar,
+                            address            varchar,
+                            rate               int,
+                            order_sum          numeric(14, 5),
+                            tip_sum            numeric(14, 5)
+                        )
+                            ON COMMIT PRESERVE ROWS;
+                        """
+                    )
+                )
+                logger.info("Temp table created.")
+            except Exception:
+                logger.exception("Unable to create temp table!")
+                raise SQLError
+
+            try:
+                logger.info("Inserting data into temp table.")
+                for row in collection:
+                    conn.execute(
+                        statement=text(
+                            f"""
+                            INSERT INTO
+                                fct_deliveries_tmp(delivery_sourse_id, address, rate, order_sum, tip_sum)
+                            VALUES
+                                ('{row.delivery_id}', '{row.address}', {row.rate}, {row.order_sum}, {row.tip_sum});
+                            """
+                        )
+                    )
+                logger.info("Data was inserted.")
+            except Exception:
+                logger.exception("Unable to insert data into temp table!")
+                raise SQLError
+
+            try:
+                logger.info("Inserting data into dds.fct_deliveries.")
+                conn.execute(
+                    statement=text(
+                        """
+                        INSERT INTO
+                            dds.fct_deliveries(delivery_id, order_id, courier_id, address, rate, order_sum, tip_sum)
+                        SELECT
+                            d.id AS delivery_id,
+                            d.order_id,
+                            d.courier_id,
+                            tmp.address,
+                            tmp.rate,
+                            tmp.order_sum,
+                            tmp.tip_sum
+                        FROM
+                            fct_deliveries_tmp tmp
+                            LEFT JOIN (
+                                SELECT
+                                    id,
+                                    delivery_id,
+                                    timestamp_id,
+                                    courier_id,
+                                    order_id
+                                FROM dds.dm_deliveries
+                                ) d ON tmp.delivery_sourse_id = d.delivery_id
+                        ON CONFLICT (delivery_id) DO UPDATE
+                            SET
+                                order_id   = excluded.order_id,
+                                courier_id = excluded.courier_id,
+                                address    = excluded.address,
+                                rate       = excluded.rate,
+                                order_sum  = excluded.order_sum,
+                                tip_sum    = excluded.tip_sum;
+                        """
+                    )
+                )
+                logger.info("Data was inserted successfully.")
+            except Exception:
+                logger.exception(
+                    "Unable to insert data to dds.fct_deliveries table! Updating failed."
+                )
+                raise SQLError
+
+        logger.info(
+            f"dds.fct_deliveries table was succesfully updated with {len(collection)} rows."
+        )
+
 
 class CDMDataLoader:
     def __init__(self) -> None:
         self.dwh_conn = DatabaseConnector(db="pg_dwh").connect_to_database()
 
     def load_settlement_report(self) -> None:
-        logger.info("Starting data mart load process.")
+        logger.info("Starting cdm.dm_settlement_report data mart updating process.")
         try:
             logger.info("Executing postgres query...")
             with self.dwh_conn.begin() as conn:
@@ -1099,17 +1693,93 @@ class CDMDataLoader:
                         """
                     )
                 )
-            logger.info("Data mart was updated successfully.")
+            logger.info("dm_settlement_report was updated successfully.")
+
         except Exception:
             logger.exception("Unable to execute query! Updating failed.")
+            raise SQLError
+
+    def load_dm_courier_ledger(self) -> None:
+        logger.info("Starting cdm.dm_courier_ledger data mart updating process.")
+        try:
+            logger.info("Executing postgres query...")
+            with self.dwh_conn.begin() as conn:
+                conn.execute(
+                    statement=text(
+                        """
+                        INSERT INTO
+                            cdm.dm_courier_ledger(courier_id, settlement_year, settlement_month, order_count, orders_total_sum, rate_avg, order_processing_fee,
+                                                courier_order_sum, courier_tips_sum, courier_reward_sum)
+                        SELECT
+                            q.courier_id,
+                            q.year                                               AS settlement_year,
+                            q.month                                              AS settlement_month,
+                            q.order_count,
+                            q.orders_total_sum,
+                            q.rate_avg,
+                            q.order_processing_fee,
+                            q.courier_order_sum,
+                            q.courier_tips_sum,
+                            SUM(q.courier_order_sum + q.courier_tips_sum) * 0.95 AS courier_reward_sum
+                        FROM
+                            (
+                                SELECT
+                                    fct.courier_id,
+                                    t.year,
+                                    t.month,
+                                    COUNT(fct.order_id)       AS order_count,
+                                    SUM(fct.order_sum)        AS orders_total_sum,
+                                    AVG(fct.rate)             AS rate_avg,
+                                    SUM(fct.order_sum) * 0.25 AS order_processing_fee,
+                                    CASE
+                                        WHEN AVG(fct.rate) < 4 THEN (CASE WHEN SUM(fct.order_sum * 0.05) > 100 THEN SUM(fct.order_sum * 0.05) ELSE 100 END)
+                                        WHEN AVG(fct.rate) >= 4 AND AVG(fct.rate) < 4.5
+                                            THEN (CASE WHEN SUM(fct.order_sum * 0.07) > 150 THEN SUM(fct.order_sum * 0.07) ELSE 150 END)
+                                        WHEN AVG(fct.rate) >= 4.5 AND AVG(fct.rate) < 4.9 THEN (CASE
+                                                                                                    WHEN SUM(fct.order_sum * 0.08) > 175
+                                                                                                        THEN SUM(fct.order_sum * 0.07)
+                                                                                                    ELSE 175 END)
+                                        WHEN AVG(fct.rate) >= 4.9 THEN (CASE
+                                                                            WHEN SUM(fct.order_sum * 0.1) > 200 THEN SUM(fct.order_sum * 0.07)
+                                                                            ELSE 200 END)
+                                        END                   AS courier_order_sum,
+                                    SUM(fct.tip_sum)          AS courier_tips_sum
+                                FROM
+                                    dds.fct_deliveries fct
+                                    LEFT JOIN (
+                                        SELECT
+                                            id,
+                                            timestamp_id
+                                        FROM dds.dm_orders
+                                        ) o ON fct.order_id = o.id
+                                    LEFT JOIN (
+                                        SELECT
+                                            id,
+                                            year,
+                                            month
+                                        FROM dds.dm_timestamps
+                                        ) t ON o.timestamp_id = t.id
+                                GROUP BY 1, 2, 3
+                                ) q
+                        GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9
+                        ON CONFLICT (courier_id, settlement_year, settlement_month) DO UPDATE
+                            SET
+                                order_count          = excluded.order_count,
+                                orders_total_sum     = excluded.orders_total_sum,
+                                rate_avg             = excluded.rate_avg,
+                                order_processing_fee = excluded.order_processing_fee,
+                                courier_order_sum    = excluded.courier_order_sum,
+                                courier_tips_sum     = excluded.courier_tips_sum,
+                                courier_reward_sum   = excluded.courier_reward_sum;
+                        """
+                    )
+                )
+            logger.info("dm_courier_ledger was updated successfully.")
+        except Exception:
+            logger.exception("Unable to execute query! Updating failed.")
+            raise SQLError
 
 
 if __name__ == "__main__":
 
-    data_mover = CDMDataLoader()
-    # data_mover.load_users()
-    # data_mover.load_restaurants()
-    # data_mover.load_timestamps()
-    # data_mover.load_products()
-    # data_mover.load_orders()
-    data_mover.load_settlement_report()
+    pass

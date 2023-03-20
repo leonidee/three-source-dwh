@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 # airflow
-from airflow.decorators import dag, task
+from airflow.decorators import dag
 from airflow.operators.empty import EmptyOperator
 from airflow.models.baseoperator import chain
 
@@ -11,15 +11,11 @@ from airflow.models.baseoperator import chain
 sys.path.append(str(Path(__file__).parent.parent))
 
 from pkg.main import CDMDataLoader
+from pkg.tasks import load_settlement_report, load_dm_courier_ledger
 
 DAG_START_DATE = datetime(2023, 3, 12)
 
 data_loader = CDMDataLoader()
-
-
-@task
-def load_settlement_report(data_loader: CDMDataLoader) -> None:
-    data_loader.load_settlement_report()
 
 
 @dag(
@@ -38,11 +34,12 @@ def taskflow() -> None:
 
     start = EmptyOperator(task_id="starting")
 
-    report = load_settlement_report(data_loader=data_loader)
+    settlement_report = load_settlement_report(data_loader=data_loader)
+    courier_report = load_dm_courier_ledger(data_loader=data_loader)
 
     end = EmptyOperator(task_id="ending")
 
-    chain(start, report, end)
+    chain(start, settlement_report, courier_report, end)
 
 
 dag = taskflow()

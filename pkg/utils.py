@@ -127,6 +127,31 @@ class DatabaseConnector:
         return conn_obj
 
 
+class HeadersGetter:
+    def _get_headers() -> dict:
+
+        logger.info("Loading .env variables.")
+        try:
+            find_dotenv(raise_error_if_not_found=True)
+            load_dotenv(verbose=True, override=True)
+            logger.info(".env was loaded successfully.")
+        except Exception:
+            logger.exception("Unable to load .env! Please check if its accessible.")
+            raise DotEnvError
+        try:
+            HEADERS = {
+                "X-API-KEY": getenv("APIKEY"),
+                "X-Nickname": getenv("NICKNAME"),
+                "X-Cohort": getenv("COHORT"),
+            }
+            logger.info("All variables recieved for API connection.")
+        except Exception:
+            logger.exception("Unable to get one or more variables!")
+            raise DotEnvError
+
+        return HEADERS
+
+
 class StgEtlSyncer:
     def __init__(self, engine: Engine) -> None:
         self.engine = engine

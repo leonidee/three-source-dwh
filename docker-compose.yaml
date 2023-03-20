@@ -60,7 +60,7 @@ x-airflow-common:
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'false'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
-    _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-python-dotenv==0.21.1 pymongo==4.3.3}
+    _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-python-dotenv==0.21.1 pymongo==4.3.3 requests==2.28.2}
   volumes:
     - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
     - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
@@ -69,7 +69,6 @@ x-airflow-common:
     - ${AIRFLOW_PROJ_DIR:-.}/addons:/opt/airflow/addons
     - ${AIRFLOW_PROJ_DIR:-.}/pkg:/opt/airflow/pkg
     - ${AIRFLOW_PROJ_DIR:-.}/sql:/opt/airflow/sql
-    # - ${AIRFLOW_PROJ_DIR:-.}/airflow.cfg:/opt/airflow/airflow.cfg
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
     &airflow-common-depends-on
