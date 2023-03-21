@@ -22,7 +22,7 @@ DWH имеет несколько основных слоев:
 В папке `dags` находятся основные даги:
 - `dags/init-dwh-dag.py` - Даг инициализирующий все слои хранилища. Запускается один раз, после запуска docker-compose с Airflow. Выполняет DDL скприпт `sql/init-dwh-ddl.sql` и триггерит на запуск даг `load-stg-dwh-dag.py`
 
-![init-dwh-dag](https://github.com/Leonidee/three-source-dwh/tree/master/addons/init-dwh-dag.png?raw=true)
+![init-dwh-dag](https://github.com/Leonidee/three-source-dwh/blob/master/addons/init-dwh-dag.png?raw=true)
 
 - `dags/load-stg-dwh-dag.py`  - Загрузка или апдейт STG слоя
 
