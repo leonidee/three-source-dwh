@@ -26,15 +26,15 @@ DWH имеет несколько основных слоев:
 
 - `dags/load-stg-dwh-dag.py`  - Загрузка или апдейт STG слоя
 
-![load-stg-dwh-dag](https://github.com/Leonidee/three-source-dwh/tree/master/addons/load-stg-dwh-dag.png?raw=true)
+![load-stg-dwh-dag](https://github.com/Leonidee/three-source-dwh/blob/master/addons/load-stg-dwh-dag.png?raw=true)
 
 - `dags/load-dds-dwh-dag.py` - Загрузка DDS слоя
 
-![load-dds-dwh-dag](https://github.com/Leonidee/three-source-dwh/tree/master/addons/load-dds-dwh-dag.png?raw=true)
+![load-dds-dwh-dag](https://github.com/Leonidee/three-source-dwh/blob/master/addons/load-dds-dwh-dag.png?raw=true)
 
 - `dags/load-cdm-dag.py` - Финальный даг, обновляющий витрины в CDM слое
 
-![load-cdm-dag](https://github.com/Leonidee/three-source-dwh/tree/master/addons/load-cdm-dag.png?raw=true)
+![load-cdm-dag](https://github.com/Leonidee/three-source-dwh/blob/master/addons/load-cdm-dag.png?raw=true)
 
 ### Bussiness Logic
 Вся бизнес логика разбита по пакетам и находится в папке `pkg`:
