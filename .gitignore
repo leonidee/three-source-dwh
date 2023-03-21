@@ -3,5 +3,4 @@ plugins/*
 __pycache__
 .env
 .venv
-addons/*
-addons
+addons/mongo-source-cert.crt
