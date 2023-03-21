@@ -21,9 +21,20 @@ DWH имеет несколько основных слоев:
 ### DAGs
 В папке `dags` находятся основные даги:
 - `dags/init-dwh-dag.py` - Даг инициализирующий все слои хранилища. Запускается один раз, после запуска docker-compose с Airflow. Выполняет DDL скприпт `sql/init-dwh-ddl.sql` и триггерит на запуск даг `load-stg-dwh-dag.py`
+
+![init-dwh-dag](https://github.com/Leonidee/three-source-dwh/tree/master/addons/init-dwh-dag.png?raw=true
+
 - `dags/load-stg-dwh-dag.py`  - Загрузка или апдейт STG слоя
+
+![load-stg-dwh-dag](https://github.com/Leonidee/three-source-dwh/tree/master/addons/load-stg-dwh-dag.png?raw=true
+
 - `dags/load-dds-dwh-dag.py` - Загрузка DDS слоя
+
+![load-dds-dwh-dag](https://github.com/Leonidee/three-source-dwh/tree/master/addons/load-dds-dwh-dag.png?raw=true
+
 - `dags/load-cdm-dag.py` - Финальный даг, обновляющий витрины в CDM слое
+
+![load-cdm-dag](https://github.com/Leonidee/three-source-dwh/tree/master/addons/load-cdm-dag.png?raw=true
 
 ### Bussiness Logic
 Вся бизнес логика разбита по пакетам и находится в папке `pkg`:
