@@ -739,8 +739,8 @@ class DDSDataLoader:
         users = [
             DDSUser(
                 user_id=bl[1],
-                user_name=json.loads(ol[2])["name"],
-                user_login=json.loads(ol[2])["login"],
+                user_name=ol[2]["name"],
+                user_login=ol[2]["login"],
             )
             for ol in order_users
             for bl in bonus_users
@@ -797,7 +797,7 @@ class DDSDataLoader:
         restaurants = [
             DDSRestaurant(
                 restaurant_id=row[1],
-                restaurant_name=json.loads(row[2])["name"],
+                restaurant_name=row[2]["name"],
                 active_from=row[3],
                 active_to=datetime(2099, 12, 31, 00, 00, 00, 000),
             )
@@ -853,9 +853,9 @@ class DDSDataLoader:
             raise SQLError
 
         orders_ts = [
-            datetime.fromisoformat(json.loads(row[0])["date"])
+            datetime.fromisoformat(row[0]["date"])
             for row in orders_ts
-            if json.loads(row[0])["final_status"] in ("CANCELLED", "CLOSED")
+            if row[0]["final_status"] in ("CANCELLED", "CLOSED")
         ]
         try:
             logger.info("Getting data from stg.deliverysystem_deliveries.")
@@ -1021,7 +1021,7 @@ class DDSDataLoader:
                 active_to=datetime(2099, 12, 31, 00, 00, 00, 000),
             )
             for row in products
-            for r in json.loads(row[1])["menu"]
+            for r in row[1]["menu"]
         ]
         logger.info("Starting updating process.")
         with self.dwh_conn.begin() as conn:
@@ -1133,12 +1133,12 @@ class DDSDataLoader:
         orders = [
             DDSOrder(
                 order_key=row[0],
-                order_status=json.loads(row[1])["final_status"],
-                restaurant_id=json.loads(row[1])["restaurant"]["id"],
-                date=datetime.fromisoformat(json.loads(row[1])["date"]).strftime(
+                order_status=row[1]["final_status"],
+                restaurant_id=row[1]["restaurant"]["id"],
+                date=datetime.fromisoformat(row[1]["date"]).strftime(
                     "%Y-%m-%d %H:%M:%S"
                 ),
-                user_id=json.loads(row[1])["user"]["id"],
+                user_id=row[1]["user"]["id"],
             )
             for row in orders
         ]
@@ -1401,7 +1401,7 @@ class DDSDataLoader:
             logger.info("Collecting `DDSFactProductSale` object.")
             bonuses = [
                 DDSFactProductSale(
-                    order_id=json.loads(row[0])["order_id"],
+                    order_id=row[0]["order_id"],
                     product_id=r["product_id"],
                     price=r["price"],
                     quantity=r["quantity"],
@@ -1409,7 +1409,7 @@ class DDSDataLoader:
                     bonus_grant=int(r["bonus_grant"]),
                 )
                 for row in bonus_raw
-                for r in json.loads(row[0])["product_payments"]
+                for r in row[0]["product_payments"]
             ]
 
         logger.info("Starting updating process.")
